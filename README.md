@@ -40,9 +40,11 @@ app.py                Original plain-Flask/SQLite version of the app (local only
 npm install                       # local wrangler (also gives config schema hints)
 
 # 1. Database
+npx wrangler d1 list              # already created? reuse it, skip the next line
 npx wrangler d1 create systematics-black-midi-db
-#    -> copy the printed database_id into wrangler.jsonc (`d1_databases[0].database_id`)
-#    The id in the checked-in config is the *local* dev database, so this step is required.
+#    -> copy the printed database_id into wrangler.jsonc (`d1_databases[0].database_id`).
+#    This project's database already exists with the id in the checked-in config, so
+#    `d1 list` normally shows it and there is nothing to create or paste.
 
 # 2. Production secrets (before the first deploy - see the note below)
 npx wrangler secret put SESSION_SECRET    # long random string, e.g. openssl rand -hex 32

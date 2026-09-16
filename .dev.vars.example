@@ -1,0 +1,5 @@
+# Copy to .dev.vars and fill in for local development.
+# Production secrets are set with `npx wrangler secret put <NAME>`.
+
+SESSION_SECRET=change-me-to-a-long-random-string
+ADMIN_PASSWORD=change-me

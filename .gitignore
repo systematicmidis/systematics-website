@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-workers/
+python_modules/
+.venv*/
+# Local Flask app (app.py)
+site.db
+static/uploads/
+
+# Cloudflare / wrangler
+.wrangler/
+.dev.vars
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
