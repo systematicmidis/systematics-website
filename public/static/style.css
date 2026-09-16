@@ -264,6 +264,59 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
   white-space:pre-wrap;
 }
 
+/* Google+-style profile: name and Follow button on one row, counts under it --- */
+.profile-name-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.profile-actions { padding-top:12px; }
+.profile-stats { margin-top:12px; color:#777; font-size:13px; display:flex; gap:18px; flex-wrap:wrap; }
+.profile-stats strong { color:#333; }
+.profile-stats a { color:#777; text-decoration:none; }
+.profile-stats a:hover { color:#357ae8; }
+
+.follow-form { margin:0; }
+.follow-button {
+  display:inline-block; padding:6px 16px; border:1px solid #357ae8; border-radius:2px;
+  background:#357ae8; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;
+  text-decoration:none; line-height:1.5;
+}
+.follow-button:hover { background:#2d6ac9; }
+.follow-button.following { background:#fff; color:#357ae8; }
+.follow-button.following:hover { background:#f2f7ff; }
+.follow-self { color:#999; font-size:12px; }
+
+/* Followers / following lists ------------------------------------------------- */
+.people-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:18px; }
+@media (max-width: 780px) { .people-grid { grid-template-columns:1fr; } }
+.people-card { background:#fff; border:1px solid #d5d5d5; box-shadow:0 1px 2px rgba(0,0,0,.08); padding:14px 16px 6px; }
+.people-card h2 { font-size:15px; font-weight:bold; margin:0; }
+.section-heading { display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid #eee; padding-bottom:9px; margin-bottom:6px; }
+.section-more { font-size:12px; color:#357ae8; text-decoration:none; }
+.section-more:hover { text-decoration:underline; }
+.person-row { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px solid #f1f1f1; }
+.person-row:last-child { border-bottom:0; }
+.person-main { flex:1; min-width:0; }
+.person-main a { color:inherit; text-decoration:none; }
+.person-main a:hover strong { text-decoration:underline; }
+.person-meta { display:block; color:#999; font-size:12px; margin-top:2px; }
+.person-bio { margin:4px 0 0; color:#666; font-size:12px; line-height:1.5; }
+.person-row .follow-button { padding:4px 12px; font-size:12px; }
+
+/* Connections page (a profile's full follower or following list) -------------- */
+.connections-cover { height:80px; background:linear-gradient(135deg,#555,#888); overflow:hidden; }
+.connections-head { background:#fff; border:1px solid #d5d5d5; box-shadow:0 1px 2px rgba(0,0,0,.08); margin-bottom:14px; }
+.connections-user { display:flex; align-items:center; gap:12px; padding:14px 18px; }
+.connections-who { flex:1; min-width:0; }
+.connections-who h1 { margin:0; font-size:20px; font-weight:400; }
+.connections-who h1 a { color:inherit; text-decoration:none; }
+.connections-who h1 a:hover { text-decoration:underline; }
+
+/* The About block ------------------------------------------------------------ */
+.about-card { background:#fff; border:1px solid #d5d5d5; box-shadow:0 1px 2px rgba(0,0,0,.08); padding:16px 18px; }
+.about-bio { margin:0 0 12px; color:#555; line-height:1.6; white-space:pre-wrap; }
+.about-facts { display:grid; grid-template-columns:120px 1fr; gap:6px 12px; margin:0; font-size:13px; }
+.about-facts dt { color:#999; }
+.about-facts dd { margin:0; color:#444; }
+.about-facts code { background:#f1f1f1; padding:2px 5px; }
+
 .setting-block { margin-top:20px; padding-top:16px; border-top:1px solid #eee; }
 .setting-block label { display:block; margin:12px 0 0; }
 .setting-visual { margin-top:4px; }

@@ -1,18 +1,26 @@
 {% extends "base.html" %}
-{% from "_widgets.html" import avatar, category_badge, link_card, vote_bar with context %}
-{% block title %}{% if category %}{{ category_labels[category] }}{% else %}Systematics Black Midi site{% endif %}{% endblock %}
+{% from "_widgets.html" import post_card with context %}
+{% block title %}{% if feed == 'following' %}Following · {% elif category %}{{ category_labels[category] }} · {% endif %}Systematics Black Midi site{% endblock %}
 {% block content %}
 <div class="feed-header">
-  <h1>{% if category == 'systematics' %}Systematics posts{% elif category == 'community' %}Community posts{% else %}Systematics Black Midi site{% endif %}</h1>
+  <h1>
+    {%- if feed == 'following' %}Following
+    {%- elif category == 'systematics' %}Systematics posts
+    {%- elif category == 'community' %}Community posts
+    {%- else %}Systematics Black Midi site{% endif -%}
+  </h1>
   <p>
-    {% if category == 'systematics' %}Posts and updates from the site owner.
+    {% if feed == 'following' %}Posts from the people you follow, plus your own.
+    {% elif category == 'systematics' %}Posts and updates from the site owner.
     {% elif category == 'community' %}Everything the community has posted.
     {% else %}Projects, huge MIDI experiments and updates from everyone.{% endif %}
   </p>
 </div>
 
+{# The Following tab is shown to everyone; the route sends a signed-out visitor to
+   sign in first, the same way voting and writing do. #}
 <nav class="tabs">
-  <a class="tab{% if not category %} active{% endif %}" href="{{ url_for('home') }}">
+  <a class="tab{% if not category and feed != 'following' %} active{% endif %}" href="{{ url_for('home') }}">
     All posts <span class="tab-count">{{ counts['all'] }}</span>
   </a>
   <a class="tab{% if category == 'community' %} active{% endif %}" href="{{ url_for('home', category='community') }}">
@@ -21,45 +29,28 @@
   <a class="tab{% if category == 'systematics' %} active{% endif %}" href="{{ url_for('home', category='systematics') }}">
     Systematics posts <span class="tab-count">{{ counts['systematics'] }}</span>
   </a>
+  <a class="tab{% if feed == 'following' %} active{% endif %}" href="{{ url_for('home', feed='following') }}">
+    Following{% if following_total %} <span class="tab-count">{{ following_total }}</span>{% endif %}
+  </a>
 </nav>
 
 {% if current_user %}
 <div class="feed-cta"><a class="button" href="{{ url_for('new_post') }}">＋ Write a post</a></div>
 {% else %}
 <div class="feed-cta muted">
-  <a href="{{ url_for('register') }}">Create an account</a> to post, comment and vote.
+  <a href="{{ url_for('register') }}">Create an account</a> to post, comment and follow people.
 </div>
 {% endif %}
 
 {% for item in posts %}
-<article class="post-card">
-  <div class="post-head">
-    {% if item.author_username %}
-      {{ avatar(item.author_picture, item.author_display_name) }}
-      <div class="post-author">
-        <strong><a href="{{ url_for('profile', username=item.author_username) }}">{{ item.author_display_name }}</a></strong>
-        <span>{{ category_badge(item) }} · {{ item.created_at[:10] }}{% if item.status != 'published' %} · {{ item.status }}{% endif %}</span>
-      </div>
-    {% else %}
-      <div class="avatar site-avatar">BM</div>
-      <div class="post-author">
-        <strong>Systematics Black Midi site</strong>
-        <span>{{ category_badge(item) }} · {{ item.created_at[:10] }}</span>
-      </div>
-    {% endif %}
-    {% if is_admin or (current_user and item.user_id and item.user_id == current_user.id) %}
-      <a class="more" href="{{ url_for('edit_post', post_id=item.id) }}">Edit</a>
-    {% endif %}
-  </div>
-  <div class="post-body">
-    <h2><a href="{{ url_for('post', post_id=item.id) }}">{{ item.title }}</a></h2>
-    <p>{{ item.content[:500] }}{% if item.content|length > 500 %}…{% endif %}</p>
-    {{ link_card(item, compact=true) }}
-    {% if item.content|length > 500 %}<a class="post-link" href="{{ url_for('post', post_id=item.id) }}">Read more</a>{% endif %}
-  </div>
-  {{ vote_bar(item) }}
-</article>
+  {{ post_card(item) }}
 {% else %}
-<div class="empty">No posts yet.{% if current_user %} <a href="{{ url_for('new_post') }}">Write the first one.</a>{% endif %}</div>
+<div class="empty">
+  {% if feed == 'following' %}
+    Nothing here yet. <a href="{{ url_for('home') }}">Find people to follow</a> on the home stream.
+  {% else %}
+    No posts yet.{% if current_user %} <a href="{{ url_for('new_post') }}">Write the first one.</a>{% endif %}
+  {% endif %}
+</div>
 {% endfor %}
 {% endblock %}

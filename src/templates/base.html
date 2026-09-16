@@ -31,7 +31,9 @@
     <a class="side-link" href="{{ url_for('home', category='community') }}">▤ &nbsp; Community posts</a>
     <a class="side-link" href="{{ url_for('home', category='systematics') }}">★ &nbsp; Systematics posts</a>
     {% if current_user %}
+      <a class="side-link" href="{{ url_for('home', feed='following') }}">☰ &nbsp; Following stream</a>
       <a class="side-link" href="{{ url_for('profile', username=current_user.username) }}">● &nbsp; My profile</a>
+      <a class="side-link" href="{{ url_for('followers', username=current_user.username) }}">◍ &nbsp; My followers</a>
     {% endif %}
     <div class="sidebar-note">
       <strong>Systematics Black Midi site</strong>

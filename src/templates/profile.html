@@ -1,7 +1,9 @@
 {% extends "base.html" %}
-{% from "_widgets.html" import category_badge with context %}
+{% from "_widgets.html" import avatar, follow_button, person_row, post_card with context %}
 {% block title %}{{ user.display_name }} · Systematics Black Midi site{% endblock %}
 {% block content %}
+{# Google+-style header: cover, avatar, name, tagline, follower counts and the
+   Follow button, then the profile's own posts as a stream. #}
 <div class="profile-card">
   <div class="profile-cover">
     {% if user.banner %}
@@ -14,32 +16,86 @@
     {% else %}
       <div class="profile-avatar">{{ user.display_name[:1]|upper }}</div>
     {% endif %}
-    <h1>{{ user.display_name }}</h1>
-    <div class="username">@{{ user.username }}</div>
+    <div class="profile-name-row">
+      <div>
+        <h1>{{ user.display_name }}</h1>
+        <div class="username">@{{ user.username }}</div>
+      </div>
+      <div class="profile-actions">
+        {% if is_self %}
+          <a class="button" href="{{ url_for('profile_settings') }}">Edit profile</a>
+        {% else %}
+          {{ follow_button(user, is_following, url_for('profile', username=user.username)) }}
+        {% endif %}
+      </div>
+    </div>
     {% if user.bio %}
       <p class="profile-bio">{{ user.bio }}</p>
     {% endif %}
-    <div class="user-id">User ID: <code>{{ user.user_id }}</code></div>
-    <p class="muted">Member since {{ user.created_at[:10] }}</p>
-    {% if current_user and current_user.id == user.id %}
-      <a class="button" href="{{ url_for('profile_settings') }}">Edit profile</a>
-    {% endif %}
+    <div class="profile-stats">
+      <span><strong>{{ posts|length }}</strong> post{% if posts|length != 1 %}s{% endif %}</span>
+      <a href="{{ url_for('followers', username=user.username) }}">
+        <strong>{{ followers }}</strong> follower{% if followers != 1 %}s{% endif %}
+      </a>
+      <a href="{{ url_for('following', username=user.username) }}">
+        <strong>{{ following }}</strong> following
+      </a>
+    </div>
   </div>
 </div>
 
-<div class="section-label">Posts ({{ posts|length }})</div>
-{% for item in posts %}
-<div class="profile-post">
-  <a href="{{ url_for('post', post_id=item.id) }}"><strong>{{ item.title }}</strong></a>
-  <span>{{ category_badge(item) }} · {{ item.created_at[:10] }} ·
-    <span class="score{% if item.score > 0 %} positive{% elif item.score < 0 %} negative{% endif %}">{{ item.score }}</span> points ·
-    {{ item.comment_count }} comment{% if item.comment_count != 1 %}s{% endif %}</span>
+<div class="people-grid">
+  <section class="people-card">
+    <div class="section-heading">
+      <h2>Followers</h2>
+      {% if followers %}
+        <a class="section-more" href="{{ url_for('followers', username=user.username) }}">View all {{ followers }}</a>
+      {% endif %}
+    </div>
+    {% for person in follower_people %}
+      {{ person_row(person, person.viewer_follows, url_for('followers', username=user.username)) }}
+    {% else %}
+      <p class="muted">No followers yet.{% if is_self %} Posts you share are how people find you.{% endif %}</p>
+    {% endfor %}
+  </section>
+
+  <section class="people-card">
+    <div class="section-heading">
+      <h2>Following</h2>
+      {% if following %}
+        <a class="section-more" href="{{ url_for('following', username=user.username) }}">View all {{ following }}</a>
+      {% endif %}
+    </div>
+    {% for person in following_people %}
+      {{ person_row(person, person.viewer_follows, url_for('following', username=user.username)) }}
+    {% else %}
+      <p class="muted">{{ user.display_name }} is not following anyone yet.</p>
+    {% endfor %}
+  </section>
 </div>
+
+<div class="section-label" id="about">About</div>
+<div class="about-card">
+  {% if user.bio %}
+    <p class="about-bio">{{ user.bio }}</p>
+  {% else %}
+    <p class="muted">No bio yet.{% if is_self %} <a href="{{ url_for('profile_settings') }}">Add one</a> to introduce yourself.{% endif %}</p>
+  {% endif %}
+  <dl class="about-facts">
+    <dt>Username</dt><dd>@{{ user.username }}</dd>
+    <dt>Member since</dt><dd>{{ user.created_at[:10] }}</dd>
+    <dt>User ID</dt><dd><code>{{ user.user_id }}</code></dd>
+  </dl>
+</div>
+
+<div class="section-label" id="posts">Posts ({{ posts|length }})</div>
+{% for item in posts %}
+  {{ post_card(item) }}
 {% else %}
-<p class="muted">No posts yet.</p>
+<div class="empty">No posts yet.{% if is_self %} <a href="{{ url_for('new_post') }}">Write one.</a>{% endif %}</div>
 {% endfor %}
 
-<div class="section-label">Recent comments</div>
+<div class="section-label" id="comments">Recent comments</div>
 {% for comment in comments %}
 <div class="profile-comment">
   <p>{{ comment.content }}</p>

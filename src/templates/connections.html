@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import avatar, follow_button, person_row with context %}
+{% set is_followers = direction == 'followers' %}
+{% block title %}{{ 'Followers' if is_followers else 'Following' }} of {{ user.display_name }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+{# The list behind a profile's follower counts: Google+ showed the same thing when
+   you clicked the number under somebody's name. #}
+<div class="connections-head">
+  {% if user.banner %}
+    <div class="connections-cover"><img class="profile-banner" src="{{ url_for('uploads', filename=user.banner) }}" alt=""></div>
+  {% endif %}
+  <div class="connections-user">
+    {{ avatar(user.profile_picture, user.display_name) }}
+    <div class="connections-who">
+      <h1><a href="{{ url_for('profile', username=user.username) }}">{{ user.display_name }}</a></h1>
+      <span class="person-meta">@{{ user.username }} · {{ followers }} follower{% if followers != 1 %}s{% endif %} · {{ following }} following</span>
+    </div>
+    {% if not is_self %}{{ follow_button(user, is_following) }}{% endif %}
+  </div>
+</div>
+
+<nav class="tabs">
+  <a class="tab" href="{{ url_for('profile', username=user.username) }}">{{ user.display_name }}</a>
+  <a class="tab{% if is_followers %} active{% endif %}" href="{{ url_for('followers', username=user.username) }}">
+    Followers <span class="tab-count">{{ followers }}</span>
+  </a>
+  <a class="tab{% if not is_followers %} active{% endif %}" href="{{ url_for('following', username=user.username) }}">
+    Following <span class="tab-count">{{ following }}</span>
+  </a>
+</nav>
+
+<div class="section-label">
+  {% if is_followers %}People following {{ user.display_name }}{% else %}People {{ user.display_name }} follows{% endif %}
+</div>
+{% for person in people %}
+  {{ person_row(person, person.viewer_follows) }}
+{% else %}
+<p class="muted">
+  {% if is_followers %}Nobody follows {{ user.display_name }} yet.{% else %}{{ user.display_name }} is not following anyone yet.{% endif %}
+</p>
+{% endfor %}
+{% endblock %}

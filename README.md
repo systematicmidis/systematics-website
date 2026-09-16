@@ -1,7 +1,7 @@
 # Systematics Black MIDI site
 
-A small Flask community site (accounts with bios, avatars and custom profile banners, plus
-posts, two feeds, likes/dislikes and threaded comments) that runs on **Cloudflare Workers**
+A small Flask community site (accounts with bios, avatars and custom profile banners,
+followers, posts, two feeds, likes/dislikes and threaded comments) that runs on **Cloudflare Workers**
 using the Python Workers runtime and D1 - and that fits on the **Workers Free plan, with no
 payment method on file**. See ["Running free"](#running-free-no-payment-method) for what that
 costs and limits.
@@ -9,7 +9,7 @@ costs and limits.
 | Piece | Cloudflare product | Where it lives |
 | --- | --- | --- |
 | Flask app (routes + Jinja templates) | Python Workers (`workers-py` / `pywrangler`) | `src/worker.py`, `src/templates/` |
-| Users (with bios), posts, comments, votes | D1 (SQLite) binding `DB` | `migrations/` |
+| Users (with bios), posts, comments, votes, follows | D1 (SQLite) binding `DB` | `migrations/` |
 | Uploaded profile pictures and banners | D1 `uploads` table (BLOB rows) | `migrations/0005_uploads_in_d1.sql` |
 | Stylesheets | Workers static assets binding `ASSETS` | `public/static/` |
 
@@ -150,6 +150,39 @@ web server. Facts worth knowing:
 - **Admin -> Posts -> Refresh link cards** re-reads the links in every post (up to
   `MAX_LINK_REFRESH_PER_RUN`, 20 per run - the Free plan allows 50 subrequests per
   invocation). This is how posts written before this feature existed get their cards.
+
+## Followers and profiles
+
+The site is built as a Google+-style network: profiles have a cover, an About block and
+follower counts, people follow each other, and the home page has a **Following** stream.
+
+**Following is one-way and one row.** `follows` (`0008_follows.sql`) stores
+`(follower_id, followed_id)` with a composite primary key, so the same person cannot be
+followed twice - SQLite rejects the duplicate rather than trusting the application to check
+first - and both foreign keys cascade, so deleting an account cannot leave rows pointing at
+nobody. Two people following each other is simply two rows.
+
+**The button toggles.** `POST /follow/<username>` follows when you are not following and
+unfollows when you are, the same way the vote buttons work. Following yourself is refused in
+the route (not just hidden in the template), so a hand-made request cannot create a row the
+profile pages would then have to render around. A signed-out visitor gets a Follow link to
+`/login?next=...` instead of a button.
+
+**Where followers show up.** `/profile/<username>` shows the counts under the name, up to
+`FOLLOW_PREVIEW_LIMIT` (6) followers and followings, and an About block; the counts and the
+"View all" links lead to `/profile/<username>/followers` and `/profile/<username>/following`
+(capped at `FOLLOW_LIST_LIMIT`, 200). Each row in those lists carries the *viewer's* follow
+state as a column, so a list of 50 people renders 50 correct buttons without 50 extra
+queries; your own row says "This is you".
+
+**The Following stream** is `/?feed=following`: posts by the people you follow *plus your
+own*, which is what Google+ put in your stream. It is a tab on the home page for everyone;
+signed-out visitors are sent to sign in first. `?feed=following` and `?category=` are
+alternatives rather than combinable filters.
+
+**Redirect targets are checked.** `next` values are only honoured when they are
+root-relative (`safe_next()`), so a hand-edited form cannot bounce a visitor to another site;
+the sign-in form uses the same guard.
 
 ## Schema changes
 

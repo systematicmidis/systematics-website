@@ -40,6 +40,71 @@
   {%- endif -%}
 {%- endmacro %}
 
+{# Follow / Following button, the same control Google+ put next to a name. An
+   anonymous visitor gets the sign-in link instead, and your own profile gets no
+   button at all - "/follow/<your own name>" is refused server-side as well. #}
+{% macro follow_button(person, following=false, next_url='') -%}
+  {%- if current_user and current_user.id == person.id -%}
+    <span class="follow-self">This is you</span>
+  {%- elif current_user -%}
+    <form class="follow-form" method="post" action="{{ url_for('follow', username=person.username) }}">
+      <input type="hidden" name="next" value="{{ next_url or request.path }}">
+      {% if following %}
+        <button class="follow-button following" type="submit" title="Stop following">Following</button>
+      {% else %}
+        <button class="follow-button" type="submit" title="Follow">Follow</button>
+      {% endif %}
+    </form>
+  {%- else -%}
+    <a class="follow-button" href="{{ url_for('login', next=next_url or request.path) }}">Follow</a>
+  {%- endif -%}
+{%- endmacro %}
+
+{# One person in a followers/following list: avatar, name, follower count, bio. #}
+{% macro person_row(person, following=false, next_url='') -%}
+<div class="person-row">
+  {{ avatar(person.profile_picture, person.display_name) }}
+  <div class="person-main">
+    <a href="{{ url_for('profile', username=person.username) }}"><strong>{{ person.display_name }}</strong></a>
+    <span class="person-meta">@{{ person.username }} · {{ person.follower_count }} follower{% if person.follower_count != 1 %}s{% endif %} · {{ person.post_count }} post{% if person.post_count != 1 %}s{% endif %}</span>
+    {% if person.bio %}<p class="person-bio">{{ person.bio[:160] }}{% if person.bio|length > 160 %}…{% endif %}</p>{% endif %}
+  </div>
+  {{ follow_button(person, following, next_url) }}
+</div>
+{%- endmacro %}
+
+{# One post as it appears in a stream: author head, body, link card and vote bar.
+   Shared by the home feed and profiles so a profile's stream looks like the feed. #}
+{% macro post_card(post) -%}
+<article class="post-card">
+  <div class="post-head">
+    {% if post.author_username %}
+      {{ avatar(post.author_picture, post.author_display_name) }}
+      <div class="post-author">
+        <strong><a href="{{ url_for('profile', username=post.author_username) }}">{{ post.author_display_name }}</a></strong>
+        <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}{% if post.status != 'published' %} · {{ post.status }}{% endif %}</span>
+      </div>
+    {% else %}
+      <div class="avatar site-avatar">BM</div>
+      <div class="post-author">
+        <strong>Systematics Black Midi site</strong>
+        <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}</span>
+      </div>
+    {% endif %}
+    {% if is_admin or (current_user and post.user_id and post.user_id == current_user.id) %}
+      <a class="more" href="{{ url_for('edit_post', post_id=post.id) }}">Edit</a>
+    {% endif %}
+  </div>
+  <div class="post-body">
+    <h2><a href="{{ url_for('post', post_id=post.id) }}">{{ post.title }}</a></h2>
+    <p>{{ post.content[:500] }}{% if post.content|length > 500 %}…{% endif %}</p>
+    {{ link_card(post, compact=true) }}
+    {% if post.content|length > 500 %}<a class="post-link" href="{{ url_for('post', post_id=post.id) }}">Read more</a>{% endif %}
+  </div>
+  {{ vote_bar(post) }}
+</article>
+{%- endmacro %}
+
 {% macro category_badge(post) -%}
   <span class="badge badge-{{ post.category }}">
     {{ 'Systematics' if post.category == 'systematics' else 'Community' }}

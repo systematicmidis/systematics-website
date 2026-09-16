@@ -141,6 +141,13 @@ POST_CATEGORY_LABELS = {
     "systematics": "Systematics posts",
 }
 
+# Followers ------------------------------------------------------------------
+# One row per relationship in ``follows``; the profile pages list them newest first.
+# The cap keeps a runaway account from turning a profile into an unbounded query.
+FOLLOW_LIST_LIMIT = 200
+# The profile header previews this many followers and followings before "View all".
+FOLLOW_PREVIEW_LIMIT = 6
+
 # Link cards ----------------------------------------------------------------
 # A post that contains a web link gets a card underneath it, built from the
 # target page's Open Graph tags - the same tags Discord, Slack and every other
@@ -459,6 +466,18 @@ def valid_username(value):
     return bool(re.fullmatch(r"[A-Za-z0-9_]{3,24}", value))
 
 
+def safe_next(value, fallback):
+    """A ``next`` target only if it stays on this site, else the fallback.
+
+    Every ``next`` value this app writes is a root-relative path from ``url_for``,
+    so anything else (``https://evil.example``, ``//evil.example``) is somebody
+    hand-editing the form and is dropped rather than redirected to.
+    """
+    if value and value.startswith("/") and not value.startswith("//"):
+        return value
+    return fallback
+
+
 def post_category_for(username):
     """Owner accounts post to the Systematics feed, everyone else to Community."""
     return "systematics" if is_owner_username(username) else "community"
@@ -500,6 +519,71 @@ def fetch_posts(where="", params=(), limit=None):
     if limit:
         sql += f" LIMIT {int(limit)}"
     return query(sql, viewer, *params)
+
+
+def follow_counts(user_id):
+    """``(followers, following)`` totals for one account's profile header."""
+    row = first(
+        """SELECT (SELECT COUNT(*) FROM follows WHERE followed_id=?) AS followers,
+                  (SELECT COUNT(*) FROM follows WHERE follower_id=?) AS following""",
+        user_id, user_id,
+    )
+    if not row:
+        return 0, 0
+    return row["followers"] or 0, row["following"] or 0
+
+
+def is_following(follower_id, followed_id):
+    """True when ``follower_id`` follows ``followed_id`` (0 means anonymous)."""
+    if not follower_id or not followed_id:
+        return False
+    return bool(first(
+        "SELECT 1 FROM follows WHERE follower_id=? AND followed_id=?",
+        follower_id, followed_id,
+    ))
+
+
+def follow_list(user_id, direction, viewer_id=0, limit=FOLLOW_LIST_LIMIT):
+    """The people following ``user_id``, or the people ``user_id`` follows.
+
+    Each row carries the *viewer's* own follow state for that person, so a list of
+    50 followers renders 50 correct buttons without 50 extra queries.
+    """
+    if direction == "following":
+        selected, matched = "follows.followed_id", "follows.follower_id"
+    else:
+        selected, matched = "follows.follower_id", "follows.followed_id"
+    return query(f"""
+        SELECT users.id, users.username, users.display_name, users.profile_picture,
+               users.bio, follows.created_at AS followed_at,
+               (SELECT COUNT(*) FROM follows f WHERE f.followed_id=users.id)
+                   AS follower_count,
+               (SELECT COUNT(*) FROM posts
+                 WHERE posts.user_id=users.id AND posts.status='published')
+                   AS post_count,
+               (SELECT COUNT(*) FROM follows mine
+                 WHERE mine.follower_id=? AND mine.followed_id=users.id)
+                   AS viewer_follows
+        FROM follows
+        JOIN users ON users.id = {selected}
+        WHERE {matched}=?
+        ORDER BY follows.created_at DESC, users.display_name COLLATE NOCASE
+        LIMIT {int(limit)}
+    """, viewer_id, user_id)
+
+
+def viewer_follow_state(user):
+    """Everything a profile header or follow button needs about one account."""
+    viewer = current_user()
+    viewers_id = viewer["id"] if viewer else 0
+    followers, following = follow_counts(user["id"])
+    return {
+        "followers": followers,
+        "following": following,
+        "is_self": bool(viewer and viewer["id"] == user["id"]),
+        "is_following": is_following(viewers_id, user["id"]),
+        "viewer_id": viewers_id,
+    }
 
 
 def category_counts():
@@ -854,19 +938,40 @@ def static_files(path):
 
 @app.route("/")
 def home():
-    """The feed. ``?category=community`` / ``?category=systematics`` filters it."""
+    """The feed. ``?category=`` filters by feed, ``?feed=following`` by who you follow."""
+    feed = request.args.get("feed", "")
     category = request.args.get("category", "")
     if category not in POST_CATEGORIES:
         category = ""
     where = "WHERE posts.status='published'"
     params = []
-    if category:
-        where += " AND posts.category=?"
-        params.append(category)
+    if feed == "following":
+        # The Following stream and the per-category tabs are alternatives, not
+        # combinable filters - Google+ had one stream per circle, not a grid.
+        category = ""
+        viewer_id = session.get("user_db_id")
+        if not viewer_id:
+            flash("Sign in to see posts from the people you follow.", "error")
+            return redirect(url_for("login", next=url_for("home", feed="following")))
+        # Your own posts belong in your stream too, the way they did on Google+.
+        where += (
+            " AND posts.user_id IN (SELECT followed_id FROM follows"
+            " WHERE follower_id=? UNION SELECT ?)"
+        )
+        params.extend([viewer_id, viewer_id])
+    else:
+        feed = ""
+        if category:
+            where += " AND posts.category=?"
+            params.append(category)
+    viewer = current_user()
     return render_template(
         "index.html",
         posts=fetch_posts(where, tuple(params)),
         category=category,
+        feed=feed,
+        # How many people you follow, shown on the Following tab.
+        following_total=follow_counts(viewer["id"])[1] if viewer else 0,
         category_labels=POST_CATEGORY_LABELS,
         counts=category_counts(),
     )
@@ -1118,7 +1223,7 @@ def login():
             # sign-in rather than inherited from the last one.
             if request.form.get("remember"):
                 session.permanent = True
-            return redirect(request.form.get("next") or url_for("home"))
+            return redirect(safe_next(request.form.get("next"), url_for("home")))
         flash("Invalid username or password.", "error")
     return render_template(
         "login.html",
@@ -1134,11 +1239,17 @@ def logout():
     return redirect(url_for("home"))
 
 
-@app.route("/profile/<username>")
-def profile(username):
+def profile_user(username):
+    """The profile row for ``username``, or a 404 for an unknown account."""
     user = first("SELECT * FROM users WHERE username=? COLLATE NOCASE", username)
     if not user:
         abort(404)
+    return user
+
+
+@app.route("/profile/<username>")
+def profile(username):
+    user = profile_user(username)
     comments = query("""
         SELECT comments.content, comments.created_at, posts.id AS post_id, posts.title
         FROM comments JOIN posts ON posts.id=comments.post_id
@@ -1148,7 +1259,76 @@ def profile(username):
     posts = fetch_posts(
         "WHERE posts.user_id=? AND posts.status='published'", (user["id"],)
     )
-    return render_template("profile.html", user=user, posts=posts, comments=comments)
+    state = viewer_follow_state(user)
+    return render_template(
+        "profile.html",
+        user=user,
+        posts=posts,
+        comments=comments,
+        **state,
+        follower_people=follow_list(
+            user["id"], "followers", state["viewer_id"], FOLLOW_PREVIEW_LIMIT
+        ),
+        following_people=follow_list(
+            user["id"], "following", state["viewer_id"], FOLLOW_PREVIEW_LIMIT
+        ),
+    )
+
+
+def connections_page(username, direction):
+    """The full followers or following list behind a profile's "View all" link."""
+    user = profile_user(username)
+    state = viewer_follow_state(user)
+    return render_template(
+        "connections.html",
+        user=user,
+        direction=direction,
+        people=follow_list(user["id"], direction, state["viewer_id"]),
+        **state,
+    )
+
+
+@app.route("/profile/<username>/followers")
+def followers(username):
+    return connections_page(username, "followers")
+
+
+@app.route("/profile/<username>/following")
+def following(username):
+    return connections_page(username, "following")
+
+
+@app.route("/follow/<username>", methods=["POST"])
+@login_required
+def follow(username):
+    """Follow or unfollow: the same button toggles, like the vote buttons do."""
+    user = first(
+        "SELECT id, username, display_name FROM users WHERE username=? COLLATE NOCASE",
+        username,
+    )
+    if not user:
+        abort(404)
+    viewer_id = session["user_db_id"]
+    # Following yourself is refused here rather than at the button, so a hand-made
+    # request cannot create a row the site would then have to render around.
+    if user["id"] != viewer_id:
+        if is_following(viewer_id, user["id"]):
+            execute(
+                "DELETE FROM follows WHERE follower_id=? AND followed_id=?",
+                viewer_id, user["id"],
+            )
+            flash(f"You unfollowed {user['display_name']}.", "success")
+        else:
+            # OR IGNORE covers a double submit racing the same insert.
+            execute(
+                "INSERT OR IGNORE INTO follows (follower_id, followed_id)"
+                " VALUES (?, ?)",
+                viewer_id, user["id"],
+            )
+            flash(f"You are now following {user['display_name']}.", "success")
+    return redirect(safe_next(
+        request.form.get("next"), url_for("profile", username=user["username"])
+    ))
 
 
 @app.route("/settings/profile", methods=["GET", "POST"])
