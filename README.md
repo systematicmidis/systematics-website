@@ -193,6 +193,18 @@ dropped in `0003_posts_use_ids.sql`, so old slug URLs now 404. The post editor n
 - **Why not R2?** It is the better home for blobs and the free tier is generous, but
   enabling it means completing an R2 subscription checkout, i.e. putting a payment method
   on the account. Everything in this project runs on D1, which does not.
+- **Never hold a JavaScript global in a module-level variable.** The first deploy of this
+  project returned `error code: 1101` on roughly **half of all requests**, including
+  `/static/*`, with `cpuTime` of 0-1 ms - i.e. the Worker died before running any
+  application code. `wrangler tail` showed the cause:
+  `NoGilError: Attempted to use PyProxy when Python GIL not held`, thrown from
+  `python_getattr` inside `preparePython()` at isolate startup. The module had
+  `from js import Object` / `from js import crypto` at the top, and the deploy-time snapshot
+  carries those live JS proxies, which then fail to rehydrate on isolate start. They are now
+  fetched inside the functions that need them (`js_object_from_entries()`,
+  `webcrypto_subtle()`); after that change, 100/100 requests and 12/12 cold starts succeeded.
+  If you add code that talks to JavaScript, follow the same rule - import it in the function,
+  not at the top of the module.
 - **Compatibility date**: Python Workers need `compatibility_flags: ["python_workers"]`.
   Bumping `compatibility_date` in `wrangler.jsonc` also bumps the Python version.
 - If wrangler complains about an unsupported field (for example `secrets`), update it:
@@ -217,12 +229,26 @@ server-side rendering and authentication "typically use 10-20 ms", and a Flask a
 in Pyodide measures in that range locally, so free-plan requests sit right at the ceiling.
 What was measured on this project (local `pywrangler dev`, wall time per request):
 
-| Request | Cost |
+| Request (local `pywrangler dev`) | Cost |
 | --- | --- |
 | Page render (`/`, `/post/1`) | ~15-25 ms |
 | Settings save with no image | ~25 ms |
 | Settings save with a 10 KB image | ~70 ms (+~4 ms per KB) |
 | ... 100 KB / 400 KB / 1.7 MB image | ~0.32 s / ~1.3 s / ~6.2 s |
+
+Measured on the deployed Worker instead (CPU time from `wrangler tail`), which is the
+number that actually matters:
+
+| Deployed behaviour | Result |
+| --- | --- |
+| Page renders, static assets, `/uploads/*` | 6-32 ms CPU, all served (the runtime allows occasional overshoot) |
+| Sign-in (100,000-iteration PBKDF2) | served, no CPU error |
+| 10 KB and 100 KB image uploads | served |
+| 500 KB and 1.7 MB image uploads | **`error code: 1102`** |
+
+So uploads are the only thing the free plan actually refuses, and the practical ceiling sits
+somewhere between 100 KB and 500 KB. Keep avatars and banners small (a few tens of KB), or
+resize them in the browser before uploading, and the whole site runs free.
 
 Two consequences:
 

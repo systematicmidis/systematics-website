@@ -13,6 +13,9 @@ static/uploads/
 .wrangler/
 .dev.vars
 node_modules/
+# secret files used with `wrangler deploy --secrets-file`
+.env*
+!.env.example
 
 # OS
 .DS_Store

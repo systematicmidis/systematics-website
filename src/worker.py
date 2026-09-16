@@ -30,21 +30,34 @@ from flask import (
     session, url_for,
 )
 from flask.sessions import SecureCookieSessionInterface
-from js import Object
 from pyodide.ffi import run_sync, to_js as _to_js
-
-try:  # the Worker global scope provides this; plain CPython does not
-    from js import crypto as js_crypto
-except ImportError:  # pragma: no cover - depends on the runtime
-    js_crypto = None
 from werkzeug.security import check_password_hash
 from werkzeug.utils import secure_filename
 from workers import wsgi
 
+# JavaScript globals are looked up inside the functions that need them instead
+# of being imported at module scope. Holding live JS proxies in module globals
+# makes the deploy-time snapshot carry them, and rehydrating one on isolate
+# start failed roughly half the time in production with
+#
+#   NoGilError: Attempted to use PyProxy when Python GIL not held
+#
+# thrown from preparePython() before any application code ran (Error 1101 on
+# about half of all requests, including /static/*). Looking them up per call
+# keeps every module global a plain Python value.
+def js_object_from_entries():
+    from js import Object
+    return Object.fromEntries
+
+
+def webcrypto_subtle():
+    from js import crypto
+    return crypto.subtle
+
 
 def to_js(obj):
     """Turn Python dictionaries/lists into plain JavaScript objects."""
-    return _to_js(obj, dict_converter=Object.fromEntries)
+    return _to_js(obj, dict_converter=js_object_from_entries())
 
 
 def find_template_dir():
@@ -130,9 +143,7 @@ def _pbkdf2_hmac_py(password, salt, iterations, dklen):
 
 def _pbkdf2_hmac_webcrypto(password, salt, iterations, dklen):
     """PBKDF2-HMAC-SHA256 via the runtime's native WebCrypto implementation."""
-    if js_crypto is None:
-        raise RuntimeError("WebCrypto is not available")
-    subtle = js_crypto.subtle
+    subtle = webcrypto_subtle()
     key = run_sync(
         subtle.importKey(
             "raw", to_js(password), to_js({"name": "PBKDF2"}), False, to_js(["deriveBits"])
