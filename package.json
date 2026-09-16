@@ -1,8 +1,10 @@
 {
   "private": true,
   "scripts": {
-    "deploy": "pywrangler deploy",
-    "dev": "pywrangler dev"
+    "dev": "uv run pywrangler dev",
+    "deploy": "uv run pywrangler deploy",
+    "db:local": "uv run pywrangler d1 migrations apply systematics-black-midi-db --local",
+    "db:remote": "uv run pywrangler d1 migrations apply systematics-black-midi-db --remote"
   },
   "devDependencies": {
     "wrangler": "latest"

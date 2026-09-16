@@ -2,18 +2,43 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "systematics-bm",
   "main": "src/worker.py",
+  // Must not be in the future. Bump it deliberately - it also selects the
+  // Python/Pyodide version used by the Worker.
   "compatibility_date": "2026-09-15",
+  // Required while Python support is in open beta.
   "compatibility_flags": ["python_workers"],
+  "observability": {
+    "enabled": true
+  },
+  "vars": {
+    // Accounts that get the admin panel just by signing in (comma separated).
+    // src/worker.py defaults to the same list, so this is only needed to change it.
+    "OWNER_USERNAMES": "SystematicMIDIS"
+    // Optional: raise/lower the PBKDF2 work factor without a code change.
+    // ("PASSWORD_HASH_ITERATIONS": "200000")
+  },
   "assets": {
+    // Front-end files (stylesheets, images). Requests are routed through the
+    // Worker first so Flask owns every route, including /static/<path>.
     "directory": "./public/",
     "binding": "ASSETS",
     "run_worker_first": true
   },
   "d1_databases": [
     {
+      // Replace database_id with the ID from `npx wrangler d1 create`.
       "binding": "DB",
       "database_name": "systematics-black-midi-db",
       "database_id": "cb486eb8-32f7-40f2-9a2b-d50968e12a90"
     }
-  ]
+  ],
+  // No R2 binding on purpose: enabling R2 requires an R2 subscription checkout.
+  // Uploaded images are BLOB rows in D1's `uploads` table instead, which keeps
+  // the site on the Workers Free plan with no payment method on file.
+  "secrets": {
+    // Set locally in .dev.vars, in production with:
+    //   npx wrangler secret put SESSION_SECRET
+    //   npx wrangler secret put ADMIN_PASSWORD
+    "required": ["SESSION_SECRET", "ADMIN_PASSWORD"]
+  }
 }
