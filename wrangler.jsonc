@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "systematics-black-midi",
+  "name": "systematics-bm",
   "main": "src/worker.py",
   "compatibility_date": "2026-09-15",
   "compatibility_flags": ["python_workers"],
