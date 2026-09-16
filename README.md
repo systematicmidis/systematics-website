@@ -129,6 +129,28 @@ parent (`comments.parent_id`), which keeps long threads readable. Deleting a par
 leaves its replies as their own top-level comments rather than removing them. Site owners can
 delete individual comments from the admin panel.
 
+**Link cards.** A post whose body contains a web link gets a card underneath it - the target
+page's title, description, image and domain, read from its Open Graph tags, the same tags
+Discord and Slack use. A MediaFire file link therefore shows the file name and MediaFire's
+file-type icon, with `mediafire.com` at the foot of the card.
+
+The card is fetched **once, when the post is saved**, and cached in the `link_previews` table
+(`0007_link_previews.sql`), so rendering a feed or a post page never waits on somebody else's
+web server. Facts worth knowing:
+
+- Only the first usable link in the body gets a card. Direct file links (`.zip`, `.7z`,
+  `.mid`, `.png`, ...), links back to this site, `localhost`/private addresses and anything
+  that is not a public `http(s)` URL are skipped (`extract_post_link()`).
+- The fetch is capped at 8 seconds and at the first `LINK_PREVIEW_MAX_CHARS` (150 KB) of the
+  page; only `text/html` is read, and a response over the size cap is refused before the body
+  is read.
+- A page with neither a title nor an image gets no card at all - the post's own link text
+  stays as it is. A failed lookup is remembered for an hour and a good card for a week, so a
+  page that was momentarily down gets its card on the next edit.
+- **Admin -> Posts -> Refresh link cards** re-reads the links in every post (up to
+  `MAX_LINK_REFRESH_PER_RUN`, 20 per run - the Free plan allows 50 subrequests per
+  invocation). This is how posts written before this feature existed get their cards.
+
 ## Schema changes
 
 The database schema is versioned in `migrations/` and applied with wrangler's D1 migration
@@ -204,6 +226,12 @@ not database migrations.
   `src/worker.py` probes for the `templates/` directory at startup.
 - **Sessions are signed with `SESSION_SECRET`.** Rotating it logs everyone out. Never
   deploy the placeholder value.
+- **Sign-in is browser-scoped unless "Remember me" is ticked.** Flask writes a session
+  cookie with no `Expires` by default, so closing the browser signs you out; ticking the box
+  at `/login` marks the session permanent and the cookie then lasts
+  `REMEMBER_SESSION_DAYS` (30) days. The tick is not remembered across sign-ins -
+  `session.clear()` discards it before the new choice is applied - but it stays ticked if
+  the password was wrong, so a retry does not silently drop it.
 - **Posts are addressed by id**: `/post/3`, not `/post/some-slug`. The `slug` column was
 dropped in `0003_posts_use_ids.sql`, so old slug URLs now 404. The post editor no longer
   asks for a slug.
@@ -215,6 +243,12 @@ dropped in `0003_posts_use_ids.sql`, so old slug URLs now 404. The post editor n
   or clearing one - or uploading a new avatar - deletes the stored image it replaced; ticking
   "Remove my banner" clears it. During sign-up only an avatar can be chosen; the banner is set
   afterwards from `/settings/profile`.
+- **Link cards cost one outbound request per URL, at save time only**
+  (`ensure_link_preview()` and the cache in `link_previews`). Measured on the deployed
+  Worker: a post save is ~130-270 ms CPU with or without a card, one post page ~134 ms, and
+  the full feed the most expensive route at ~513 ms - all served on the Free plan. The card
+  is fetched from whichever page the link points at, so a site that serves no Open Graph
+  tags to a plain HTTP client (`SystematicsLinkPreview/1.0`) simply gets no card.
 - **Uploads are D1 rows**, not files and not R2 (`0005_uploads_in_d1.sql`): the `uploads`
   table holds the bytes as a BLOB, and `/uploads/<file>` serves them with an immutable
   cache header. D1 caps a row at 2 MB, so images are limited to `MAX_IMAGE_BYTES`

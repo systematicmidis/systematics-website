@@ -17,13 +17,17 @@ a subscription checkout, D1 does not.
 """
 import hashlib
 import hmac
+import html
+import ipaddress
 import mimetypes
 import os
 import re
 import secrets
 import struct
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urljoin, urlsplit
 
 from flask import (
     Flask, Response, abort, flash, g, redirect, render_template, request,
@@ -89,6 +93,14 @@ app = Flask(__name__, template_folder=str(TEMPLATE_DIR), static_folder=None)
 MAX_IMAGE_BYTES = 1_800_000
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
 
+# Sessions are browser-scoped cookies by default: closing the browser signs you
+# out. Ticking "Remember me" at sign-in marks the session permanent instead, and
+# this is how long that cookie is allowed to last. It also caps the age of every
+# cookie, permanent or not, because SecureCookieSessionInterface validates the
+# signature against the same lifetime.
+REMEMBER_SESSION_DAYS = 30
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=REMEMBER_SESSION_DAYS)
+
 ALLOWED_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "gif", "webp"}
 
 # Password hashing -----------------------------------------------------------
@@ -128,6 +140,40 @@ POST_CATEGORY_LABELS = {
     "community": "Community posts",
     "systematics": "Systematics posts",
 }
+
+# Link cards ----------------------------------------------------------------
+# A post that contains a web link gets a card underneath it, built from the
+# target page's Open Graph tags - the same tags Discord, Slack and every other
+# chat client read. The card is fetched once, when the post is saved, and cached
+# in the D1 `link_previews` table, so rendering a feed never waits on a
+# third-party server (see migrations/0007_link_previews.sql).
+LINK_PREVIEW_USER_AGENT = (
+    "Mozilla/5.0 (compatible; SystematicsLinkPreview/1.0; +link-preview-bot)"
+)
+LINK_PREVIEW_TIMEOUT_SECONDS = 8
+# How much of a page we look at. Open Graph tags have to live in the document
+# <head>, so reading far past this only burns CPU scanning markup that cannot
+# contain a card (measured on the deployed Worker: a post save is ~130-270 ms
+# CPU with or without a link card, so the scan is not what costs.)
+LINK_PREVIEW_MAX_CHARS = 150_000
+LINK_PREVIEW_TITLE_LIMIT = 200
+LINK_PREVIEW_DESCRIPTION_LIMIT = 300
+# A card that worked is refreshed after a week; a link that produced nothing is
+# retried after an hour, so a page that was briefly down still gets its card.
+LINK_PREVIEW_TTL_SECONDS = 7 * 24 * 60 * 60
+LINK_PREVIEW_RETRY_SECONDS = 60 * 60
+# Each refresh costs one outbound request, and the Free plan allows 50
+# subrequests per invocation, so a bulk refresh stops well short of that.
+MAX_LINK_REFRESH_PER_RUN = 20
+# Direct file links are skipped: there is no page to read a card from, and some
+# of them are large downloads we would be pulling for nothing.
+LINK_PREVIEW_SKIP_EXTENSIONS = (
+    ".zip", ".7z", ".rar", ".tar", ".gz", ".mid", ".midi", ".mp3", ".mp4",
+    ".wav", ".ogg", ".webm", ".mov", ".avi", ".exe", ".msi", ".dmg", ".iso",
+    ".apk", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".pdf",
+    ".doc", ".docx", ".xls", ".xlsx", ".csv", ".json", ".xml", ".txt", ".css",
+    ".js", ".woff", ".woff2", ".ttf",
+)
 
 try:  # present on regular CPython, missing in the Pyodide runtime
     from hashlib import pbkdf2_hmac as _native_pbkdf2_hmac
@@ -440,9 +486,14 @@ def fetch_posts(where="", params=(), limit=None):
                users.profile_picture AS author_picture,
                COALESCE((SELECT SUM(value) FROM post_votes WHERE post_id=posts.id), 0) AS score,
                (SELECT COUNT(*) FROM comments WHERE post_id=posts.id) AS comment_count,
-               (SELECT value FROM post_votes WHERE post_id=posts.id AND user_id=?) AS my_vote
+               (SELECT value FROM post_votes WHERE post_id=posts.id AND user_id=?) AS my_vote,
+               link_previews.title AS link_title,
+               link_previews.description AS link_description,
+               link_previews.image AS link_image,
+               link_previews.site AS link_site
         FROM posts
         LEFT JOIN users ON users.id = posts.user_id
+        LEFT JOIN link_previews ON link_previews.url = posts.link_url
         {where}
         ORDER BY posts.created_at DESC
     """
@@ -485,6 +536,253 @@ def comment_threads(post_id):
         else:  # a reply whose parent was deleted becomes its own thread
             threads.append(row)
     return threads
+
+
+# Link cards -----------------------------------------------------------------
+
+META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+ATTR_RE = re.compile(
+    r"""([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"""
+)
+TITLE_TAG_RE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"'\]\[]+", re.IGNORECASE)
+
+
+def http_fetch():
+    """The JS ``fetch`` this Worker runs on, looked up per call.
+
+    Not ``workers.fetch``: that wrapper takes options as keyword arguments and
+    rejects the standard ``fetch(url, init)`` call. The JS global is the same
+    function underneath, and taking it here rather than at import time keeps JS
+    proxies out of module globals (see the note at the top of this file).
+    """
+    from js import fetch as worker_fetch
+    return worker_fetch
+
+
+def abort_signal(seconds):
+    """A JS AbortSignal that fires after ``seconds``, or None if unavailable."""
+    try:
+        from js import AbortSignal
+        return AbortSignal.timeout(int(seconds * 1000))
+    except Exception:  # pragma: no cover - depends on the runtime
+        return None
+
+
+def is_public_url(url):
+    """True for http(s) URLs that point at somebody else's public server.
+
+    Guards the outbound fetch against being aimed at loopback, private ranges or
+    bare intranet hostnames (which a Worker cannot reach anyway, but there is no
+    reason to try).
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    host = (parts.hostname or "").strip().lower().rstrip(".")
+    if not host or "." not in host:
+        return False
+    if host.endswith((".local", ".internal", ".localhost", ".home.arpa")):
+        return False
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return True  # an ordinary hostname
+    return not (
+        address.is_private or address.is_loopback or address.is_link_local
+        or address.is_reserved or address.is_multicast or address.is_unspecified
+    )
+
+
+def extract_post_link(content, own_host=""):
+    """The first link in a post body that is worth turning into a card."""
+    for match in URL_IN_TEXT_RE.finditer(content or ""):
+        candidate = match.group(0).rstrip(".,;:!?)")
+        if not is_public_url(candidate):
+            continue
+        parts = urlsplit(candidate)
+        host = (parts.hostname or "").lower()
+        if own_host and host == own_host.lower():
+            continue  # a link back to this site: no card needed
+        if parts.path.lower().endswith(LINK_PREVIEW_SKIP_EXTENSIONS):
+            continue
+        return candidate
+    return ""
+
+
+def parse_meta_tags(page):
+    """Map a page's meta tags to their content, keyed by property/name."""
+    found = {}
+    for tag in META_TAG_RE.findall(page):
+        attributes = {}
+        for match in ATTR_RE.finditer(tag):
+            value = next(
+                group for group in match.groups()[1:] if group is not None
+            )
+            attributes.setdefault(match.group(1).lower(), value)
+        key = (attributes.get("property") or attributes.get("name") or "").lower()
+        if key and attributes.get("content") is not None:
+            found.setdefault(key, attributes["content"])
+    return found
+
+
+def clean_text(value, limit):
+    """Unescape, collapse and trim a value pulled out of a page's HTML."""
+    if not value:
+        return ""
+    return re.sub(r"\s+", " ", html.unescape(value)).strip()[:limit].strip()
+
+
+def absolute_image_url(value, base_url):
+    """Resolve a card image to an http(s) URL we are willing to hotlink."""
+    if not value:
+        return ""
+    value = html.unescape(value).strip()
+    if value.startswith("//"):
+        value = "https:" + value
+    elif value.startswith("/"):
+        value = urljoin(base_url or "", value)
+    if not value.lower().startswith(("http://", "https://")) or len(value) > 1000:
+        return ""
+    return value if is_public_url(value) else ""
+
+
+def site_label(url):
+    """The bare domain shown at the foot of a card, e.g. ``mediafire.com``."""
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def parse_link_preview(page, base_url=""):
+    """Build a card from a page's Open Graph tags, falling back to <title>.
+
+    Returns None when the page offers nothing worth showing, so the caller can
+    record a miss instead of caching an empty card.
+    """
+    meta = parse_meta_tags(page)
+    title = clean_text(
+        meta.get("og:title") or meta.get("twitter:title"), LINK_PREVIEW_TITLE_LIMIT
+    )
+    if not title:
+        match = TITLE_TAG_RE.search(page)
+        title = clean_text(match.group(1) if match else "", LINK_PREVIEW_TITLE_LIMIT)
+    image = absolute_image_url(
+        meta.get("og:image")
+        or meta.get("og:image:secure_url")
+        or meta.get("twitter:image"),
+        base_url,
+    )
+    description = clean_text(
+        meta.get("og:description")
+        or meta.get("twitter:description")
+        or meta.get("description"),
+        LINK_PREVIEW_DESCRIPTION_LIMIT,
+    )
+    if description and description == title:
+        description = ""
+    # A card needs a title or an image to say anything the post's own text does not;
+    # pages offering neither just keep the plain link.
+    if not (title or image):
+        return None
+    return {
+        "title": title or None,
+        "description": description or None,
+        "image": image or None,
+        "site": site_label(base_url) or None,
+    }
+
+
+def lookup_link_preview(url):
+    """Fetch ``url`` and read its card out of the HTML, or None on any failure."""
+    if not is_public_url(url):
+        return None
+    init = {
+        "headers": {
+            "accept": "text/html,application/xhtml+xml",
+            "user-agent": LINK_PREVIEW_USER_AGENT,
+        },
+        "redirect": "follow",
+    }
+    signal = abort_signal(LINK_PREVIEW_TIMEOUT_SECONDS)
+    if signal is not None:
+        init["signal"] = signal
+    try:
+        response = run_sync(http_fetch()(url, to_js(init)))
+        status = int(response.status)
+        headers = response.headers
+        content_type = (headers.get("content-type") or "").lower()
+        if status >= 400 or "html" not in content_type:
+            return None
+        declared = (headers.get("content-length") or "").strip()
+        if declared.isdigit() and int(declared) > LINK_PREVIEW_MAX_CHARS * 8:
+            return None
+        page = run_sync(response.text())[:LINK_PREVIEW_MAX_CHARS]
+        final_url = response.url or url
+    except Exception as exc:  # offline, DNS failure, timeout, TLS, bad HTML...
+        app.logger.warning("Link preview failed for %s: %s", url, exc)
+        return None
+    return parse_link_preview(page, final_url)
+
+
+def preview_age_seconds(value):
+    """Seconds since a stored ``fetched_at``, or None when unparseable."""
+    try:
+        stored = datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+    return (datetime.now(timezone.utc).replace(tzinfo=None) - stored).total_seconds()
+
+
+def stored_link_preview(url):
+    """The cached card for ``url`` while it is still fresh, else None."""
+    row = first("SELECT * FROM link_previews WHERE url=?", url)
+    if not row:
+        return None
+    age = preview_age_seconds(row["fetched_at"])
+    if age is None:
+        return None
+    worked = bool(row["title"] or row["image"])
+    return row if age < (
+        LINK_PREVIEW_TTL_SECONDS if worked else LINK_PREVIEW_RETRY_SECONDS
+    ) else None
+
+
+def store_link_preview(url, preview):
+    """Cache a card (or the fact that there isn't one) for ``url``."""
+    preview = preview or {}
+    execute(
+        """INSERT INTO link_previews (url, title, description, image, site, fetched_at)
+           VALUES (?, ?, ?, ?, ?, datetime('now'))
+           ON CONFLICT(url) DO UPDATE SET title=excluded.title,
+                                         description=excluded.description,
+                                         image=excluded.image,
+                                         site=excluded.site,
+                                         fetched_at=excluded.fetched_at""",
+        url,
+        preview.get("title"),
+        preview.get("description"),
+        preview.get("image"),
+        preview.get("site") or site_label(url),
+    )
+
+
+def ensure_link_preview(url, force=False):
+    """Return a card for ``url``, fetching it only when the cache has no fresh one."""
+    if not url:
+        return None
+    if not force:
+        cached = stored_link_preview(url)
+        if cached is not None:
+            return cached
+    preview = lookup_link_preview(url)
+    store_link_preview(url, preview)
+    return preview
 
 
 def save_image_upload(file):
@@ -731,16 +1029,22 @@ def save_post(item=None):
     category = post_category_for(user["username"])
     if is_admin() and request.form.get("category") in POST_CATEGORIES:
         category = request.form["category"]
+    # A link in the body gets a card under the post. The card is fetched right here,
+    # once, and cached in D1 so no page render ever waits on another website.
+    link_url = extract_post_link(content, request.host.split(":")[0])
+    if link_url:
+        ensure_link_preview(link_url)
     if item is None:
         execute(
-            "INSERT INTO posts (title, content, status, user_id, category) VALUES (?, ?, ?, ?, ?)",
-            title, content, status, user["id"], category,
+            "INSERT INTO posts (title, content, status, user_id, category, link_url)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            title, content, status, user["id"], category, link_url or None,
         )
         created = first("SELECT last_insert_rowid() AS id")
         return url_for("post", post_id=created["id"]) if created else url_for("home")
     execute(
-        "UPDATE posts SET title=?, content=?, status=?, category=? WHERE id=?",
-        title, content, status, category, item["id"],
+        "UPDATE posts SET title=?, content=?, status=?, category=?, link_url=? WHERE id=?",
+        title, content, status, category, link_url or None, item["id"],
     )
     return url_for("post", post_id=item["id"])
 
@@ -799,16 +1103,29 @@ def login():
     if current_user():
         return redirect(url_for("home"))
     next_url = request.args.get("next", "")
+    remember = False
     if request.method == "POST":
+        remember = bool(request.form.get("remember"))
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         user = first("SELECT * FROM users WHERE username=? COLLATE NOCASE", username)
         if user and verify_password(user["password_hash"], password):
             session.clear()
             session["user_db_id"] = user["id"]
+            # "Remember me" is the only thing that gives the cookie an expiry
+            # date; without it the browser drops it when it closes. session.clear()
+            # above also discarded any previous choice, so this is set fresh each
+            # sign-in rather than inherited from the last one.
+            if request.form.get("remember"):
+                session.permanent = True
             return redirect(request.form.get("next") or url_for("home"))
         flash("Invalid username or password.", "error")
-    return render_template("login.html", next_url=next_url)
+    return render_template(
+        "login.html",
+        next_url=next_url,
+        remember=remember,
+        remember_days=REMEMBER_SESSION_DAYS,
+    )
 
 
 @app.route("/logout")
@@ -924,6 +1241,34 @@ def admin():
 def delete_comment(comment_id):
     execute("DELETE FROM comments WHERE id=?", comment_id)
     return redirect(url_for("admin") + "#comments")
+
+
+@app.post("/admin/refresh-links")
+@admin_required
+def admin_refresh_links():
+    """Re-fetch the link cards for posts that contain a URL.
+
+    Covers posts written before link cards existed, and refresh is what makes a
+    card whose target page was down resolvable later without editing the post.
+    """
+    rows = query("SELECT id, content FROM posts ORDER BY id DESC")
+    checked = cards = 0
+    for row in rows:
+        if checked >= MAX_LINK_REFRESH_PER_RUN:
+            break
+        url = extract_post_link(row["content"], request.host.split(":")[0])
+        if not url:
+            continue
+        checked += 1
+        if ensure_link_preview(url, force=True):
+            cards += 1
+        execute("UPDATE posts SET link_url=? WHERE id=?", url, row["id"])
+    if not checked:
+        flash("No posts with links to refresh.", "error")
+    else:
+        flash(f"Checked {checked} link{'s' if checked != 1 else ''}, "
+              f"rebuilt {cards} card{'s' if cards != 1 else ''}.", "success")
+    return redirect(url_for("admin") + "#posts")
 
 
 @app.errorhandler(404)

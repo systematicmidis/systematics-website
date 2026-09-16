@@ -43,6 +43,8 @@
 
     <label>Content
       <textarea name="content" rows="16" required>{{ post.content if post else '' }}</textarea>
+      <span class="muted">Paste a download or project link and the post gets a preview card
+        with the page's title, image and site.</span>
     </label>
     <div class="actions">
       <button type="submit">{% if post %}Save changes{% else %}Publish post{% endif %}</button>

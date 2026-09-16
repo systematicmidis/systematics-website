@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_widgets.html" import avatar, category_badge, vote_bar with context %}
+{% from "_widgets.html" import avatar, category_badge, link_card, vote_bar with context %}
 {% block title %}{% if category %}{{ category_labels[category] }}{% else %}Systematics Black Midi site{% endif %}{% endblock %}
 {% block content %}
 <div class="feed-header">
@@ -54,6 +54,7 @@
   <div class="post-body">
     <h2><a href="{{ url_for('post', post_id=item.id) }}">{{ item.title }}</a></h2>
     <p>{{ item.content[:500] }}{% if item.content|length > 500 %}…{% endif %}</p>
+    {{ link_card(item, compact=true) }}
     {% if item.content|length > 500 %}<a class="post-link" href="{{ url_for('post', post_id=item.id) }}">Read more</a>{% endif %}
   </div>
   {{ vote_bar(item) }}

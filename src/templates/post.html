@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_widgets.html" import avatar, category_badge, small_avatar, vote_bar with context %}
+{% from "_widgets.html" import avatar, category_badge, link_card, small_avatar, vote_bar with context %}
 {% block title %}{{ post.title }} · Systematics Black Midi site{% endblock %}
 
 {% macro comment_block(comment, viewer) %}
@@ -62,6 +62,7 @@
   <div class="post-body">
     <h1>{{ post.title }}</h1>
     <div class="post-content">{{ post.content }}</div>
+    {{ link_card(post) }}
   </div>
   {{ vote_bar(post) }}
 

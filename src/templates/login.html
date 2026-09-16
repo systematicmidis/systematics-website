@@ -7,6 +7,7 @@
     <input type="hidden" name="next" value="{{ next_url }}">
     <label>Username<input name="username" required autofocus></label>
     <label>Password<input type="password" name="password" required></label>
+    <label class="checkbox"><input type="checkbox" name="remember" value="1"{% if remember %} checked{% endif %}> Remember me for {{ remember_days }} days</label>
     <button type="submit">Sign in</button>
   </form>
   <p class="auth-bottom">Don't have an account? <a href="{{ url_for('register') }}">Create one</a>.</p>

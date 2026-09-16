@@ -9,8 +9,15 @@
   <a class="button" href="{{ url_for('new_post') }}">+ New post</a>
 </div>
 
-<section>
-  <div class="section-heading"><h2>Posts</h2><span>{{ posts|length }}</span></div>
+<section id="posts">
+  <div class="section-heading">
+    <h2>Posts</h2><span>{{ posts|length }}</span>
+    <form class="refresh-links" method="post" action="{{ url_for('admin_refresh_links') }}">
+      <button type="submit" title="Re-read the preview card for every post that contains a link">
+        Refresh link cards
+      </button>
+    </form>
+  </div>
   {% for item in posts %}
   <div class="admin-row">
     <div>

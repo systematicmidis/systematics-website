@@ -20,6 +20,26 @@
   {%- endif -%}
 {%- endmacro %}
 
+{# Rich card for a post that contains a link (title/description/image read from the
+   target page's Open Graph tags, see src/worker.py). ``compact`` drops the
+   description so the feed stays tight. #}
+{% macro link_card(post, compact=false) -%}
+  {%- if post.link_url and (post.link_title or post.link_image) -%}
+  <a class="link-card{% if compact %} link-card-compact{% endif %}" href="{{ post.link_url }}"
+     target="_blank" rel="noopener noreferrer nofollow">
+    {%- if post.link_image %}
+    <img class="link-thumb" src="{{ post.link_image }}" alt="" loading="lazy"
+         referrerpolicy="no-referrer" onerror="this.remove()">
+    {%- endif %}
+    <span class="link-text">
+      <span class="link-title">{{ post.link_title or post.link_site or post.link_url }}</span>
+      {%- if post.link_description %}<span class="link-desc">{{ post.link_description }}</span>{% endif %}
+      <span class="link-site">{{ post.link_site or post.link_url }}</span>
+    </span>
+  </a>
+  {%- endif -%}
+{%- endmacro %}
+
 {% macro category_badge(post) -%}
   <span class="badge badge-{{ post.category }}">
     {{ 'Systematics' if post.category == 'systematics' else 'Community' }}
