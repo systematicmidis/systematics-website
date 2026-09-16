@@ -1,30 +1,64 @@
 {% extends "base.html" %}
-{% block title %}Systematics Black Midi site{% endblock %}
+{% from "_widgets.html" import avatar, category_badge, vote_bar with context %}
+{% block title %}{% if category %}{{ category_labels[category] }}{% else %}Systematics Black Midi site{% endif %}{% endblock %}
 {% block content %}
 <div class="feed-header">
-  <h1>Systematics Black Midi site</h1>
-  <p>My Black MIDI projects and what I'm working on next.</p>
+  <h1>{% if category == 'systematics' %}Systematics posts{% elif category == 'community' %}Community posts{% else %}Systematics Black Midi site{% endif %}</h1>
+  <p>
+    {% if category == 'systematics' %}Posts and updates from the site owner.
+    {% elif category == 'community' %}Everything the community has posted.
+    {% else %}Projects, huge MIDI experiments and updates from everyone.{% endif %}
+  </p>
 </div>
+
+<nav class="tabs">
+  <a class="tab{% if not category %} active{% endif %}" href="{{ url_for('home') }}">
+    All posts <span class="tab-count">{{ counts['all'] }}</span>
+  </a>
+  <a class="tab{% if category == 'community' %} active{% endif %}" href="{{ url_for('home', category='community') }}">
+    Community posts <span class="tab-count">{{ counts['community'] }}</span>
+  </a>
+  <a class="tab{% if category == 'systematics' %} active{% endif %}" href="{{ url_for('home', category='systematics') }}">
+    Systematics posts <span class="tab-count">{{ counts['systematics'] }}</span>
+  </a>
+</nav>
+
+{% if current_user %}
+<div class="feed-cta"><a class="button" href="{{ url_for('new_post') }}">＋ Write a post</a></div>
+{% else %}
+<div class="feed-cta muted">
+  <a href="{{ url_for('register') }}">Create an account</a> to post, comment and vote.
+</div>
+{% endif %}
+
 {% for item in posts %}
 <article class="post-card">
   <div class="post-head">
-    <div class="avatar site-avatar">BM</div>
-    <div class="post-author">
-      <strong>Systematics Black Midi site</strong>
-      <span>Public · {{ item.created_at[:10] }}</span>
-    </div>
-    <button class="more">⋮</button>
+    {% if item.author_username %}
+      {{ avatar(item.author_picture, item.author_display_name) }}
+      <div class="post-author">
+        <strong><a href="{{ url_for('profile', username=item.author_username) }}">{{ item.author_display_name }}</a></strong>
+        <span>{{ category_badge(item) }} · {{ item.created_at[:10] }}{% if item.status != 'published' %} · {{ item.status }}{% endif %}</span>
+      </div>
+    {% else %}
+      <div class="avatar site-avatar">BM</div>
+      <div class="post-author">
+        <strong>Systematics Black Midi site</strong>
+        <span>{{ category_badge(item) }} · {{ item.created_at[:10] }}</span>
+      </div>
+    {% endif %}
+    {% if is_admin or (current_user and item.user_id and item.user_id == current_user.id) %}
+      <a class="more" href="{{ url_for('edit_post', post_id=item.id) }}">Edit</a>
+    {% endif %}
   </div>
   <div class="post-body">
-    <h2>{{ item.title }}</h2>
+    <h2><a href="{{ url_for('post', post_id=item.id) }}">{{ item.title }}</a></h2>
     <p>{{ item.content[:500] }}{% if item.content|length > 500 %}…{% endif %}</p>
     {% if item.content|length > 500 %}<a class="post-link" href="{{ url_for('post', post_id=item.id) }}">Read more</a>{% endif %}
   </div>
-  <div class="post-actions">
-    <span>💬 <a href="{{ url_for('post', post_id=item.id) }}#comments">Comment</a></span>
-    <span>＋1</span><span>↗ Share</span>
-  </div>
-  <div class="comment-preview"><a href="{{ url_for('post', post_id=item.id) }}#comments">View comments</a></div>
+  {{ vote_bar(item) }}
 </article>
-{% else %}<div class="empty">No posts yet.</div>{% endfor %}
+{% else %}
+<div class="empty">No posts yet.{% if current_user %} <a href="{{ url_for('new_post') }}">Write the first one.</a>{% endif %}</div>
+{% endfor %}
 {% endblock %}

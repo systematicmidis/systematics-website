@@ -116,9 +116,18 @@ PASSWORD_HASH_DIGEST = "sha256"
 # the shared ADMIN_PASSWORD. Override with the OWNER_USERNAMES Worker variable.
 DEFAULT_OWNER_USERNAMES = "SystematicMIDIS"
 
-# Profile bios and post statuses.
+# Profile bios, post statuses and the two feeds.
 MAX_BIO_LENGTH = 500
+MAX_POST_TITLE = 200
 POST_STATUSES = ("published", "draft")
+# Every post lands in exactly one category: owner accounts write to "systematics",
+# everybody else to "community". Both are public; the split just keeps the owner's
+# posts separable from the community feed (and filterable on the home page).
+POST_CATEGORIES = ("community", "systematics")
+POST_CATEGORY_LABELS = {
+    "community": "Community posts",
+    "systematics": "Systematics posts",
+}
 
 try:  # present on regular CPython, missing in the Pyodide runtime
     from hashlib import pbkdf2_hmac as _native_pbkdf2_hmac
@@ -358,6 +367,11 @@ def current_user():
     return g.current_user
 
 
+def is_owner_username(username):
+    """True when this account is listed in OWNER_USERNAMES."""
+    return (username or "").lower() in owner_usernames()
+
+
 def is_admin():
     """True for the shared admin password and for site owner accounts."""
     if "is_admin" not in g:
@@ -397,6 +411,80 @@ def admin_required(f):
 
 def valid_username(value):
     return bool(re.fullmatch(r"[A-Za-z0-9_]{3,24}", value))
+
+
+def post_category_for(username):
+    """Owner accounts post to the Systematics feed, everyone else to Community."""
+    return "systematics" if is_owner_username(username) else "community"
+
+
+def can_manage_post(item):
+    """True for a post's own author and for site owners/admins."""
+    if is_admin():
+        return True
+    user = current_user()
+    return bool(user and item and item["user_id"] == user["id"])
+
+
+def fetch_posts(where="", params=(), limit=None):
+    """Post rows plus author, score, comment count and the viewer's own vote.
+
+    The viewer id is bound first (0 for anonymous visitors, which matches no row),
+    so ``params`` follows the WHERE clause placeholders.
+    """
+    viewer = session.get("user_db_id") or 0
+    sql = f"""
+        SELECT posts.*,
+               users.username AS author_username,
+               users.display_name AS author_display_name,
+               users.profile_picture AS author_picture,
+               COALESCE((SELECT SUM(value) FROM post_votes WHERE post_id=posts.id), 0) AS score,
+               (SELECT COUNT(*) FROM comments WHERE post_id=posts.id) AS comment_count,
+               (SELECT value FROM post_votes WHERE post_id=posts.id AND user_id=?) AS my_vote
+        FROM posts
+        LEFT JOIN users ON users.id = posts.user_id
+        {where}
+        ORDER BY posts.created_at DESC
+    """
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    return query(sql, viewer, *params)
+
+
+def category_counts():
+    """Published post totals per feed, for the home page tabs."""
+    counts = {name: 0 for name in POST_CATEGORIES}
+    for row in query(
+        "SELECT category, COUNT(*) AS total FROM posts"
+        " WHERE status='published' GROUP BY category"
+    ):
+        counts[row["category"]] = row["total"]
+    counts["all"] = sum(counts.values())
+    return counts
+
+
+def comment_threads(post_id):
+    """A post's comments as top-level rows, each carrying its ``replies`` list."""
+    rows = query("""
+        SELECT comments.*, users.id AS author_id,
+               users.user_id AS public_user_id,
+               users.username, users.display_name, users.profile_picture
+        FROM comments
+        JOIN users ON users.id = comments.user_id
+        WHERE comments.post_id=?
+        ORDER BY comments.created_at ASC
+    """, post_id)
+    by_id = {row["id"]: row for row in rows}
+    threads = []
+    for row in rows:
+        row["replies"] = []
+    for row in rows:
+        parent = by_id.get(row.get("parent_id"))
+        if parent is not None and parent["id"] != row["id"]:
+            parent["replies"].append(row)
+        else:  # a reply whose parent was deleted becomes its own thread
+            threads.append(row)
+    return threads
 
 
 def save_image_upload(file):
@@ -468,14 +556,33 @@ def static_files(path):
 
 @app.route("/")
 def home():
-    posts = query("SELECT * FROM posts WHERE status='published' ORDER BY created_at DESC")
-    return render_template("index.html", posts=posts)
+    """The feed. ``?category=community`` / ``?category=systematics`` filters it."""
+    category = request.args.get("category", "")
+    if category not in POST_CATEGORIES:
+        category = ""
+    where = "WHERE posts.status='published'"
+    params = []
+    if category:
+        where += " AND posts.category=?"
+        params.append(category)
+    return render_template(
+        "index.html",
+        posts=fetch_posts(where, tuple(params)),
+        category=category,
+        category_labels=POST_CATEGORY_LABELS,
+        counts=category_counts(),
+    )
 
 
 @app.route("/post/<int:post_id>", methods=["GET", "POST"])
 def post(post_id):
-    item = first("SELECT * FROM posts WHERE id=? AND status='published'", post_id)
-    if not item:
+    rows = fetch_posts("WHERE posts.id=?", (post_id,))
+    if not rows:
+        abort(404)
+    item = rows[0]
+    # Drafts are unlisted: the author and site owners can open them to review,
+    # everybody else gets a 404.
+    if item["status"] != "published" and not can_manage_post(item):
         abort(404)
 
     if request.method == "POST":
@@ -483,26 +590,159 @@ def post(post_id):
             flash("Log in or create an account to comment.", "error")
             return redirect(url_for("login", next=url_for("post", post_id=post_id) + "#comments"))
         content = request.form.get("content", "").strip()
+        parent_id = request.form.get("parent_id", "").strip()
+        # Replies are one level deep: a reply to a reply attaches to the same parent,
+        # which keeps the thread readable without unbounded nesting.
+        parent = None
+        if parent_id.isdigit():
+            parent = first(
+                "SELECT id, parent_id FROM comments WHERE id=? AND post_id=?",
+                int(parent_id), item["id"],
+            )
+            if parent and parent["parent_id"]:
+                parent = first("SELECT id FROM comments WHERE id=?", parent["parent_id"])
+        anchor = f"#comment-{parent['id']}" if parent else "#comments"
         if not content:
             flash("Please enter a comment.", "error")
         elif len(content) > 2000:
             flash("Your comment is too long.", "error")
         else:
             execute(
-                "INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)",
-                item["id"], session["user_db_id"], content,
+                "INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)",
+                item["id"], session["user_db_id"], content, parent["id"] if parent else None,
             )
-            return redirect(url_for("post", post_id=post_id) + "#comments")
+            return redirect(url_for("post", post_id=post_id) + anchor)
 
-    comments = query("""
-        SELECT comments.*, users.user_id AS public_user_id,
-               users.username, users.display_name, users.profile_picture
-        FROM comments
-        JOIN users ON users.id = comments.user_id
-        WHERE comments.post_id=?
-        ORDER BY comments.created_at ASC
-    """, item["id"])
-    return render_template("post.html", post=item, comments=comments)
+    return render_template(
+        "post.html",
+        post=item,
+        comments=comment_threads(item["id"]),
+        can_manage=can_manage_post(item),
+    )
+
+
+@app.post("/post/<int:post_id>/vote")
+def vote_post(post_id):
+    """Like (+1) or dislike (-1) a post; repeating the same vote clears it."""
+    item = first("SELECT id FROM posts WHERE id=? AND status='published'", post_id)
+    if not item:
+        abort(404)
+    if not session.get("user_db_id"):
+        flash("Sign in to like or dislike posts.", "error")
+        return redirect(url_for("login", next=url_for("post", post_id=post_id)))
+    try:
+        value = int(request.form.get("value", "0"))
+    except ValueError:
+        value = 0
+    if value not in (-1, 1):
+        value = 0
+    user_id = session["user_db_id"]
+    existing = first(
+        "SELECT value FROM post_votes WHERE post_id=? AND user_id=?", post_id, user_id
+    )
+    if value == 0 or (existing and existing["value"] == value):
+        execute("DELETE FROM post_votes WHERE post_id=? AND user_id=?", post_id, user_id)
+    else:
+        execute(
+            """INSERT INTO post_votes (post_id, user_id, value) VALUES (?, ?, ?)
+               ON CONFLICT(post_id, user_id) DO UPDATE SET value=excluded.value""",
+            post_id, user_id, value,
+        )
+    return redirect(request.referrer or url_for("post", post_id=post_id))
+
+
+@app.route("/new", methods=["GET", "POST"])
+@login_required
+def new_post():
+    """Any signed-in account can post; the category follows from the account."""
+    user = current_user()
+    if request.method == "POST":
+        target = save_post()
+        if target:
+            if request.form.get("status") == "draft":
+                flash("Draft saved - it stays hidden until you publish it.", "success")
+            else:
+                flash("Post published.", "success")
+            return redirect(target)
+    return render_template(
+        "post_editor.html",
+        post=None,
+        cancel_url=url_for("home"),
+        can_choose_status=is_admin(),
+        can_choose_category=is_admin(),
+        default_category=post_category_for(user["username"]),
+    )
+
+
+@app.route("/post/<int:post_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_post(post_id):
+    item = first("SELECT * FROM posts WHERE id=?", post_id)
+    if not item:
+        abort(404)
+    if not can_manage_post(item):
+        flash("You can only edit your own posts.", "error")
+        return redirect(url_for("post", post_id=post_id))
+    if request.method == "POST":
+        target = save_post(item)
+        if target:
+            flash("Post updated.", "success")
+            return redirect(target)
+    return render_template(
+        "post_editor.html",
+        post=item,
+        cancel_url=url_for("post", post_id=post_id),
+        can_choose_status=is_admin(),
+        can_choose_category=is_admin(),
+        default_category=item["category"],
+    )
+
+
+@app.post("/post/<int:post_id>/delete")
+@login_required
+def delete_post(post_id):
+    item = first("SELECT * FROM posts WHERE id=?", post_id)
+    if not item:
+        abort(404)
+    if not can_manage_post(item):
+        flash("You can only delete your own posts.", "error")
+        return redirect(url_for("post", post_id=post_id))
+    execute("DELETE FROM post_votes WHERE post_id=?", post_id)
+    execute("DELETE FROM comments WHERE post_id=?", post_id)
+    execute("DELETE FROM posts WHERE id=?", post_id)
+    flash("Post deleted.", "success")
+    return redirect(url_for("admin") if is_admin() else url_for("home"))
+
+
+def save_post(item=None):
+    """Create or update a post from the editor form; returns where to go next."""
+    user = current_user()
+    title = request.form.get("title", "").strip()
+    content = request.form.get("content", "").strip()
+    if not title or not content:
+        flash("Title and content are required.", "error")
+        return None
+    if len(title) > MAX_POST_TITLE:
+        flash(f"Titles must be {MAX_POST_TITLE} characters or fewer.", "error")
+        return None
+    status = request.form.get("status", "published")
+    if status not in POST_STATUSES or not is_admin():
+        status = "published"  # drafts stay a site-owner tool
+    category = post_category_for(user["username"])
+    if is_admin() and request.form.get("category") in POST_CATEGORIES:
+        category = request.form["category"]
+    if item is None:
+        execute(
+            "INSERT INTO posts (title, content, status, user_id, category) VALUES (?, ?, ?, ?, ?)",
+            title, content, status, user["id"], category,
+        )
+        created = first("SELECT last_insert_rowid() AS id")
+        return url_for("post", post_id=created["id"]) if created else url_for("home")
+    execute(
+        "UPDATE posts SET title=?, content=?, status=?, category=? WHERE id=?",
+        title, content, status, category, item["id"],
+    )
+    return url_for("post", post_id=item["id"])
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -540,6 +780,14 @@ def register():
             user = first("SELECT * FROM users WHERE user_id=?", public_id)
             session.clear()
             session["user_db_id"] = user["id"]
+            if is_owner_username(username):
+                # The seeded welcome post stays authorless until an owner account
+                # exists; the first owner to register claims it (migration 0006 does
+                # the same for a database that already had the account).
+                execute(
+                    "UPDATE posts SET user_id=?, category='systematics' WHERE user_id IS NULL",
+                    user["id"],
+                )
             flash("Your account has been created!", "success")
             return redirect(url_for("home"))
 
@@ -580,7 +828,10 @@ def profile(username):
         WHERE comments.user_id=? AND posts.status='published'
         ORDER BY comments.created_at DESC LIMIT 20
     """, user["id"])
-    return render_template("profile.html", user=user, comments=comments)
+    posts = fetch_posts(
+        "WHERE posts.user_id=? AND posts.status='published'", (user["id"],)
+    )
+    return render_template("profile.html", user=user, posts=posts, comments=comments)
 
 
 @app.route("/settings/profile", methods=["GET", "POST"])
@@ -651,7 +902,11 @@ def admin_logout():
 @app.route("/admin")
 @admin_required
 def admin():
-    posts = query("SELECT * FROM posts ORDER BY created_at DESC")
+    posts = query("""
+        SELECT posts.*, users.username AS author_username
+        FROM posts LEFT JOIN users ON users.id = posts.user_id
+        ORDER BY posts.created_at DESC
+    """)
     comments = query("""
         SELECT comments.*, posts.title AS post_title,
                users.username, users.display_name
@@ -662,51 +917,6 @@ def admin():
     """)
     users = query("SELECT * FROM users ORDER BY created_at DESC")
     return render_template("admin.html", posts=posts, comments=comments, users=users)
-
-
-@app.route("/admin/new", methods=["GET", "POST"])
-@admin_required
-def new_post():
-    if request.method == "POST":
-        title = request.form.get("title", "").strip()
-        content = request.form.get("content", "").strip()
-        status = request.form.get("status", "published")
-        if status not in POST_STATUSES:
-            status = "published"
-        if not title or not content:
-            flash("Title and content are required.", "error")
-        else:
-            execute("INSERT INTO posts (title, content, status) VALUES (?, ?, ?)", title, content, status)
-            return redirect(url_for("admin"))
-    return render_template("post_editor.html", post=None)
-
-
-@app.route("/admin/edit/<int:post_id>", methods=["GET", "POST"])
-@admin_required
-def edit_post(post_id):
-    item = first("SELECT * FROM posts WHERE id=?", post_id)
-    if not item:
-        abort(404)
-    if request.method == "POST":
-        title = request.form.get("title", "").strip()
-        content = request.form.get("content", "").strip()
-        status = request.form.get("status", "published")
-        if status not in POST_STATUSES:
-            status = "published"
-        if not title or not content:
-            flash("Title and content are required.", "error")
-        else:
-            execute("UPDATE posts SET title=?, content=?, status=? WHERE id=?", title, content, status, post_id)
-            return redirect(url_for("admin"))
-    return render_template("post_editor.html", post=item)
-
-
-@app.post("/admin/delete/<int:post_id>")
-@admin_required
-def delete_post(post_id):
-    execute("DELETE FROM comments WHERE post_id=?", post_id)
-    execute("DELETE FROM posts WHERE id=?", post_id)
-    return redirect(url_for("admin"))
 
 
 @app.post("/admin/delete-comment/<int:comment_id>")

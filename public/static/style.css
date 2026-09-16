@@ -279,3 +279,67 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .setting-avatar-empty { display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:bold; }
 .checkbox { display:block; margin-top:10px; color:#777; }
 .checkbox input[type=checkbox] { width:auto; margin-right:6px; vertical-align:middle; }
+
+/* Feed tabs: All / Community / Systematics --------------------------------- */
+.tabs { display:flex; gap:2px; margin:0 0 12px; border-bottom:1px solid #d5d5d5; }
+.tab {
+  padding:9px 15px; color:#777; font-size:13px; text-decoration:none;
+  border:1px solid transparent; border-bottom:0; margin-bottom:-1px;
+}
+.tab:hover { color:#357ae8; }
+.tab.active {
+  background:#fff; border-color:#d5d5d5; color:#333; font-weight:bold;
+}
+.tab-count {
+  display:inline-block; margin-left:5px; padding:0 6px; border-radius:9px;
+  background:#eee; color:#777; font-size:11px; font-weight:normal;
+}
+.tab.active .tab-count { background:#e6effd; color:#357ae8; }
+.feed-cta { margin:0 0 14px; }
+
+/* Post author, category badge and votes ------------------------------------ */
+.badge {
+  display:inline-block; padding:1px 7px; border-radius:9px; font-size:10px;
+  text-transform:uppercase; letter-spacing:.4px;
+}
+.badge-community { background:#eef1f5; color:#5b6b7d; }
+.badge-systematics { background:#e6effd; color:#357ae8; }
+.post-head .more { font-size:12px; color:#357ae8; text-decoration:none; padding:2px 4px; }
+.post-head .more:hover { text-decoration:underline; }
+.post-manage { margin-left:auto; display:flex; align-items:center; gap:10px; }
+.post-manage .more { margin-left:0; }
+.post-manage form { margin:0; }
+.post-head a { color:inherit; }
+
+.vote-bar {
+  display:flex; align-items:center; gap:14px;
+  padding:8px 20px; border-top:1px solid #eee;
+  font-size:12px; color:#777;
+}
+.vote-bar .score { font-weight:bold; color:#555; min-width:20px; }
+.score.positive { color:#1a7f37; }
+.score.negative { color:#c5221f; }
+.vote-form { display:flex; gap:4px; }
+.vote {
+  border:1px solid #d5d5d5; background:#fafafa; color:#777; cursor:pointer;
+  font-size:12px; line-height:1; padding:5px 9px; border-radius:2px;
+}
+.vote:hover { border-color:#357ae8; color:#357ae8; }
+.vote.active { background:#357ae8; border-color:#357ae8; color:#fff; }
+.vote.signin { text-decoration:none; padding:4px 9px; }
+.comment-link { color:#777; text-decoration:none; }
+.comment-link:hover { color:#357ae8; }
+
+/* Threaded comments -------------------------------------------------------- */
+.comment-meta a { color:inherit; }
+.comment-replies { margin-left:42px; padding-left:10px; border-left:2px solid #eee; }
+.reply-box { margin-top:6px; }
+.reply-box summary { cursor:pointer; color:#777; font-size:12px; }
+.reply-box summary:hover { color:#357ae8; }
+.comment-form.compact { padding-top:8px; gap:8px; }
+.comment-form.compact textarea { font-size:13px; }
+.comment-form.compact button { align-self:flex-start; }
+.profile-post { background:#fff; border:1px solid #ddd; border-top:0; padding:12px 18px; }
+.profile-post a { text-decoration:none; color:#333; }
+.profile-post a:hover { color:#357ae8; }
+.profile-post span { display:block; margin-top:3px; color:#999; font-size:12px; }

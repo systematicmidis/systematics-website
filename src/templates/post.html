@@ -1,47 +1,84 @@
 {% extends "base.html" %}
+{% from "_widgets.html" import avatar, category_badge, small_avatar, vote_bar with context %}
 {% block title %}{{ post.title }} · Systematics Black Midi site{% endblock %}
+
+{% macro comment_block(comment, viewer) %}
+<div class="comment" id="comment-{{ comment.id }}">
+  {{ small_avatar(comment.profile_picture, comment.display_name) }}
+  <div class="comment-main">
+    <div class="comment-meta">
+      <a href="{{ url_for('profile', username=comment.username) }}"><strong>{{ comment.display_name }}</strong></a>
+      <span>@{{ comment.username }} · {{ comment.created_at }}</span>
+    </div>
+    <p>{{ comment.content }}</p>
+    {% if viewer %}
+      <details class="reply-box">
+        <summary>Reply</summary>
+        <form class="comment-form compact" method="post">
+          <input type="hidden" name="parent_id" value="{{ comment.id }}">
+          <div class="comment-inputs">
+            <textarea name="content" maxlength="2000" rows="2"
+                      placeholder="Reply to {{ comment.display_name }}..." required></textarea>
+            <button type="submit">Reply</button>
+          </div>
+        </form>
+      </details>
+    {% endif %}
+  </div>
+</div>
+{% if comment.replies %}
+<div class="comment-replies">
+  {% for reply in comment.replies %}{{ comment_block(reply, viewer) }}{% endfor %}
+</div>
+{% endif %}
+{% endmacro %}
+
 {% block content %}
 <article class="post-card full-post">
   <div class="post-head">
-    <div class="avatar site-avatar">BM</div>
-    <div class="post-author"><strong>Systematics Black Midi site</strong><span>Public · {{ post.created_at[:10] }}</span></div>
-    <button class="more">⋮</button>
+    {% if post.author_username %}
+      {{ avatar(post.author_picture, post.author_display_name) }}
+      <div class="post-author">
+        <strong><a href="{{ url_for('profile', username=post.author_username) }}">{{ post.author_display_name }}</a></strong>
+        <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}{% if post.status != 'published' %} · {{ post.status }}{% endif %}</span>
+      </div>
+    {% else %}
+      <div class="avatar site-avatar">BM</div>
+      <div class="post-author">
+        <strong>Systematics Black Midi site</strong>
+        <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}</span>
+      </div>
+    {% endif %}
+    {% if can_manage %}
+      <div class="post-manage">
+        <a class="more" href="{{ url_for('edit_post', post_id=post.id) }}">Edit</a>
+        <form method="post" action="{{ url_for('delete_post', post_id=post.id) }}"
+              onsubmit="return confirm('Delete this post and all of its comments?')">
+          <button class="more danger" type="submit">Delete</button>
+        </form>
+      </div>
+    {% endif %}
   </div>
   <div class="post-body">
     <h1>{{ post.title }}</h1>
     <div class="post-content">{{ post.content }}</div>
   </div>
-  <div class="post-actions"><span>💬 Comment</span><span>＋1</span><span>↗ Share</span></div>
+  {{ vote_bar(post) }}
+
   <section id="comments" class="comments">
-    <h3>{{ comments|length }} comment{% if comments|length != 1 %}s{% endif %}</h3>
+    <h3>{{ post.comment_count }} comment{% if post.comment_count != 1 %}s{% endif %}</h3>
     {% for comment in comments %}
-    <div class="comment">
-      {% if comment.profile_picture %}
-        <img class="small-avatar avatar-img" src="{{ url_for('uploads', filename=comment.profile_picture) }}" alt="">
-      {% else %}
-        <div class="small-avatar">{{ comment.display_name[:1]|upper }}</div>
-      {% endif %}
-      <div class="comment-main">
-        <div>
-          <a href="{{ url_for('profile', username=comment.username) }}"><strong>{{ comment.display_name }}</strong></a>
-          <span>@{{ comment.username }} · {{ comment.created_at }}</span>
-        </div>
-        <p>{{ comment.content }}</p>
-      </div>
-    </div>
+      {{ comment_block(comment, current_user) }}
     {% else %}
       <p class="muted">No comments yet. Be the first to comment!</p>
     {% endfor %}
 
     {% if current_user %}
     <form class="comment-form" method="post">
-      {% if current_user.profile_picture %}
-        <img class="small-avatar avatar-img" src="{{ url_for('uploads', filename=current_user.profile_picture) }}" alt="">
-      {% else %}
-        <div class="small-avatar">{{ current_user.display_name[:1]|upper }}</div>
-      {% endif %}
+      {{ small_avatar(current_user.profile_picture, current_user.display_name) }}
       <div class="comment-inputs">
-        <textarea name="content" maxlength="2000" rows="3" placeholder="Write a comment as {{ current_user.display_name }}..." required></textarea>
+        <textarea name="content" maxlength="2000" rows="3"
+                  placeholder="Write a comment as {{ current_user.display_name }}..." required></textarea>
         <button type="submit">Post comment</button>
       </div>
     </form>

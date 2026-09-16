@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_widgets.html" import category_badge with context %}
 {% block title %}{{ user.display_name }} · Systematics Black Midi site{% endblock %}
 {% block content %}
 <div class="profile-card">
@@ -25,6 +26,18 @@
     {% endif %}
   </div>
 </div>
+
+<div class="section-label">Posts ({{ posts|length }})</div>
+{% for item in posts %}
+<div class="profile-post">
+  <a href="{{ url_for('post', post_id=item.id) }}"><strong>{{ item.title }}</strong></a>
+  <span>{{ category_badge(item) }} · {{ item.created_at[:10] }} ·
+    <span class="score{% if item.score > 0 %} positive{% elif item.score < 0 %} negative{% endif %}">{{ item.score }}</span> points ·
+    {{ item.comment_count }} comment{% if item.comment_count != 1 %}s{% endif %}</span>
+</div>
+{% else %}
+<p class="muted">No posts yet.</p>
+{% endfor %}
 
 <div class="section-label">Recent comments</div>
 {% for comment in comments %}

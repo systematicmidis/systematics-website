@@ -15,7 +15,12 @@
   <div class="admin-row">
     <div>
       <strong>{{ item.title }}</strong>
-      <small>{{ item.status }} · {{ item.created_at }}</small>
+      <small>
+        {{ 'Systematics' if item.category == 'systematics' else 'Community' }}
+        · {{ item.status }}
+        · by {{ item.author_username or 'the site' }}
+        · {{ item.created_at }}
+      </small>
     </div>
     <div class="actions">
       <a href="{{ url_for('post', post_id=item.id) }}">View</a>

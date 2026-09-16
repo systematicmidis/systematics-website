@@ -1,0 +1,46 @@
+{# Shared markup used by the feed, post pages and profiles. Import with context,
+   since vote_bar needs current_user from the context processor:
+
+       {% from "_widgets.html" import avatar, vote_bar with context %}
+#}
+
+{% macro avatar(picture, name, extra='') -%}
+  {%- if picture -%}
+    <img class="avatar avatar-img {{ extra }}" src="{{ url_for('uploads', filename=picture) }}" alt="">
+  {%- else -%}
+    <div class="avatar {{ extra }}">{{ (name or '?')[:1]|upper }}</div>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro small_avatar(picture, name) -%}
+  {%- if picture -%}
+    <img class="small-avatar avatar-img" src="{{ url_for('uploads', filename=picture) }}" alt="">
+  {%- else -%}
+    <div class="small-avatar">{{ (name or '?')[:1]|upper }}</div>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro category_badge(post) -%}
+  <span class="badge badge-{{ post.category }}">
+    {{ 'Systematics' if post.category == 'systematics' else 'Community' }}
+  </span>
+{%- endmacro %}
+
+{% macro vote_bar(post) -%}
+<div class="vote-bar">
+  <span class="score{% if post.score > 0 %} positive{% elif post.score < 0 %} negative{% endif %}"
+        title="Score">{{ post.score }}</span>
+  {% if current_user %}
+    <form class="vote-form" method="post" action="{{ url_for('vote_post', post_id=post.id) }}">
+      <button class="vote{% if post.my_vote == 1 %} active{% endif %}" name="value" value="1"
+              type="submit" title="Like">▲</button>
+      <button class="vote{% if post.my_vote == -1 %} active{% endif %}" name="value" value="-1"
+              type="submit" title="Dislike">▼</button>
+    </form>
+  {% else %}
+    <a class="vote signin" href="{{ url_for('login', next=url_for('post', post_id=post.id)) }}">Sign in to vote</a>
+  {% endif %}
+  <a class="comment-link" href="{{ url_for('post', post_id=post.id) }}#comments">💬
+    {{ post.comment_count }} comment{% if post.comment_count != 1 %}s{% endif %}</a>
+</div>
+{%- endmacro %}

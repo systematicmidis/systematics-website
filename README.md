@@ -1,14 +1,15 @@
 # Systematics Black MIDI site
 
-A small Flask community site (posts, comments, accounts, bios, avatars and custom profile
-banners) that runs on **Cloudflare Workers** using the Python Workers runtime and D1 - and
-that fits on the **Workers Free plan, with no payment method on file**. See
-["Running free"](#running-free-no-payment-method) for what that costs and limits.
+A small Flask community site (accounts with bios, avatars and custom profile banners, plus
+posts, two feeds, likes/dislikes and threaded comments) that runs on **Cloudflare Workers**
+using the Python Workers runtime and D1 - and that fits on the **Workers Free plan, with no
+payment method on file**. See ["Running free"](#running-free-no-payment-method) for what that
+costs and limits.
 
 | Piece | Cloudflare product | Where it lives |
 | --- | --- | --- |
 | Flask app (routes + Jinja templates) | Python Workers (`workers-py` / `pywrangler`) | `src/worker.py`, `src/templates/` |
-| Users (with bios), posts, comments | D1 (SQLite) binding `DB` | `migrations/` |
+| Users (with bios), posts, comments, votes | D1 (SQLite) binding `DB` | `migrations/` |
 | Uploaded profile pictures and banners | D1 `uploads` table (BLOB rows) | `migrations/0005_uploads_in_d1.sql` |
 | Stylesheets | Workers static assets binding `ASSETS` | `public/static/` |
 
@@ -98,6 +99,36 @@ before you share the site - usernames are unique, so whoever registers it first 
 user (for example from a device you do not want to log in on). It is set with
 `npx wrangler secret put ADMIN_PASSWORD`.
 
+## Posting, feeds, votes and replies
+
+**Anyone with an account can post.** Signed-in users see "Write" in the nav and a
+"Write a post" button on the feed; posts appear immediately (no moderation queue), and the
+author can edit or delete their own post from the post page. Site owners can additionally
+edit or delete *any* post, keep a post as a draft, and file it into either feed.
+
+**Two feeds.** Every post carries a category, and `/?category=community` or
+`/?category=systematics` filters the feed (the tabs on the home page). Regular accounts can
+only write to **Community posts** - the category is decided from the author's account, so a
+forged `category` form field is ignored (`post_category_for()` in `src/worker.py`). Only
+accounts listed in `OWNER_USERNAMES` land in **Systematics posts**, which stays your channel
+while the community has its own. Draft posts are unlisted: only their author and site owners
+can open `/post/<id>` for them.
+
+The seeded welcome post has no author until an owner account exists, so the first owner to
+register claims it (`register()` in `src/worker.py`), and a database that already has the
+account is fixed by migration `0006` - which is why the first post on the site is attributed
+to `SystematicMIDIS` rather than to "the site".
+
+**Voting.** `▲` / `▼` on any published post write one row per user to `post_votes`, so a
+visitor can switch between like and dislike (or click the same button again to clear it).
+Signed-out visitors see a "Sign in to vote" link instead. Post scores and comment counts are
+computed per request in `fetch_posts()`.
+
+**Threaded comments.** Comments are one level deep: a reply to a reply attaches to the same
+parent (`comments.parent_id`), which keeps long threads readable. Deleting a parent comment
+leaves its replies as their own top-level comments rather than removing them. Site owners can
+delete individual comments from the admin panel.
+
 ## Schema changes
 
 The database schema is versioned in `migrations/` and applied with wrangler's D1 migration
@@ -108,7 +139,7 @@ npm run db:local     # uv run pywrangler d1 migrations apply systematics-black-m
 npm run db:remote    # the same against production D1
 ```
 
-Add a new numbered file (for example `migrations/0006_add_post_tags.sql`) instead of editing
+Add a new numbered file (for example `migrations/0007_add_post_tags.sql`) instead of editing
 one that has already been applied. Migrations run in filename order.
 
 ## Deploy

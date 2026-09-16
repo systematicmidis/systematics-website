@@ -1,28 +1,52 @@
 {% extends "base.html" %}
-{% block title %}{% if post %}Edit{% else %}New{% endif %} Post{% endblock %}
+{% block title %}{% if post %}Edit{% else %}New{% endif %} post{% endblock %}
 {% block content %}
 <div class="editor">
   <p class="eyebrow">CONTENT EDITOR</p>
   <h1>{% if post %}Edit post{% else %}Create a post{% endif %}</h1>
   <form method="post">
     <label>Title
-      <input name="title" value="{{ post.title if post else '' }}" required>
+      <input name="title" value="{{ post.title if post else '' }}" maxlength="200" required>
     </label>
     {% if post %}
-      <p class="muted">Live at <code>/post/{{ post.id }}</code></p>
+      <p class="muted">
+        {% if post.status == 'draft' %}Draft preview{% else %}Live{% endif %} at
+        <a href="{{ url_for('post', post_id=post.id) }}"><code>/post/{{ post.id }}</code></a>
+        {%- if post.status == 'draft' %} (only you and site owners can see it){% endif %}
+      </p>
     {% endif %}
-    <label>Status
-      <select name="status">
-        <option value="published" {% if not post or post.status == 'published' %}selected{% endif %}>Published</option>
-        <option value="draft" {% if post and post.status == 'draft' %}selected{% endif %}>Draft</option>
-      </select>
-    </label>
+
+    {% if can_choose_category %}
+      <label>Feed
+        <select name="category">
+          <option value="community" {% if default_category == 'community' %}selected{% endif %}>Community posts</option>
+          <option value="systematics" {% if default_category == 'systematics' %}selected{% endif %}>Systematics posts</option>
+        </select>
+      </label>
+    {% else %}
+      <p class="muted">
+        This post will appear in the
+        <strong>{{ 'Systematics posts' if default_category == 'systematics' else 'Community posts' }}</strong> feed.
+      </p>
+    {% endif %}
+
+    {% if can_choose_status %}
+      <label>Status
+        <select name="status">
+          <option value="published" {% if not post or post.status == 'published' %}selected{% endif %}>Published</option>
+          <option value="draft" {% if post and post.status == 'draft' %}selected{% endif %}>Draft</option>
+        </select>
+      </label>
+    {% else %}
+      <p class="muted">Your post is published as soon as you save it.</p>
+    {% endif %}
+
     <label>Content
       <textarea name="content" rows="16" required>{{ post.content if post else '' }}</textarea>
     </label>
     <div class="actions">
       <button type="submit">{% if post %}Save changes{% else %}Publish post{% endif %}</button>
-      <a href="{{ url_for('admin') }}">Cancel</a>
+      <a href="{{ cancel_url }}">Cancel</a>
     </div>
   </form>
 </div>
