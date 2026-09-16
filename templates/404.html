@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Not found{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <p class="eyebrow">404</p>
+  <h1>Page not found</h1>
+  <a class="read-more" href="{{ url_for('home') }}">← Back home</a>
+</div>
+{% endblock %}

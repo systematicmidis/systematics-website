@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ post.title }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<article class="post-card full-post">
+  <div class="post-head">
+    <div class="avatar site-avatar">BM</div>
+    <div class="post-author"><strong>Systematics Black Midi site</strong><span>Public · {{ post.created_at[:10] }}</span></div>
+    <button class="more">⋮</button>
+  </div>
+  <div class="post-body">
+    <h1>{{ post.title }}</h1>
+    <div class="post-content">{{ post.content }}</div>
+  </div>
+  <div class="post-actions"><span>💬 Comment</span><span>＋1</span><span>↗ Share</span></div>
+  <section id="comments" class="comments">
+    <h3>{{ comments|length }} comment{% if comments|length != 1 %}s{% endif %}</h3>
+    {% for comment in comments %}
+    <div class="comment">
+      {% if comment.profile_picture %}
+        <img class="small-avatar avatar-img" src="{{ url_for('uploads', filename=comment.profile_picture) }}" alt="">
+      {% else %}
+        <div class="small-avatar">{{ comment.display_name[:1]|upper }}</div>
+      {% endif %}
+      <div class="comment-main">
+        <div>
+          <a href="{{ url_for('profile', username=comment.username) }}"><strong>{{ comment.display_name }}</strong></a>
+          <span>@{{ comment.username }} · {{ comment.created_at }}</span>
+        </div>
+        <p>{{ comment.content }}</p>
+      </div>
+    </div>
+    {% else %}
+      <p class="muted">No comments yet. Be the first to comment!</p>
+    {% endfor %}
+
+    {% if current_user %}
+    <form class="comment-form" method="post">
+      {% if current_user.profile_picture %}
+        <img class="small-avatar avatar-img" src="{{ url_for('uploads', filename=current_user.profile_picture) }}" alt="">
+      {% else %}
+        <div class="small-avatar">{{ current_user.display_name[:1]|upper }}</div>
+      {% endif %}
+      <div class="comment-inputs">
+        <textarea name="content" maxlength="2000" rows="3" placeholder="Write a comment as {{ current_user.display_name }}..." required></textarea>
+        <button type="submit">Post comment</button>
+      </div>
+    </form>
+    {% else %}
+      <div class="login-to-comment">
+        <a href="{{ url_for('login', next=url_for('post', slug=post.slug) + '#comments') }}">Sign in</a>
+        or <a href="{{ url_for('register') }}">create an account</a> to comment.
+      </div>
+    {% endif %}
+  </section>
+</article>
+{% endblock %}
