@@ -8,9 +8,9 @@
     <label>Title
       <input name="title" value="{{ post.title if post else '' }}" required>
     </label>
-    <label>URL slug
-      <input name="slug" value="{{ post.slug if post else '' }}" placeholder="my-next-black-midi" required>
-    </label>
+    {% if post %}
+      <p class="muted">Live at <code>/post/{{ post.id }}</code></p>
+    {% endif %}
     <label>Status
       <select name="status">
         <option value="published" {% if not post or post.status == 'published' %}selected{% endif %}>Published</option>

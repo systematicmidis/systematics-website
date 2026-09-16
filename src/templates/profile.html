@@ -2,7 +2,11 @@
 {% block title %}{{ user.display_name }} · Systematics Black Midi site{% endblock %}
 {% block content %}
 <div class="profile-card">
-  <div class="profile-cover"></div>
+  <div class="profile-cover">
+    {% if user.banner %}
+      <img class="profile-banner" src="{{ url_for('uploads', filename=user.banner) }}" alt="">
+    {% endif %}
+  </div>
   <div class="profile-info">
     {% if user.profile_picture %}
       <img class="profile-avatar avatar-img" src="{{ url_for('uploads', filename=user.profile_picture) }}" alt="">
@@ -11,6 +15,9 @@
     {% endif %}
     <h1>{{ user.display_name }}</h1>
     <div class="username">@{{ user.username }}</div>
+    {% if user.bio %}
+      <p class="profile-bio">{{ user.bio }}</p>
+    {% endif %}
     <div class="user-id">User ID: <code>{{ user.user_id }}</code></div>
     <p class="muted">Member since {{ user.created_at[:10] }}</p>
     {% if current_user and current_user.id == user.id %}
@@ -23,7 +30,7 @@
 {% for comment in comments %}
 <div class="profile-comment">
   <p>{{ comment.content }}</p>
-  <span>on <a href="{{ url_for('post', slug=comment.slug) }}">{{ comment.title }}</a> · {{ comment.created_at }}</span>
+  <span>on <a href="{{ url_for('post', post_id=comment.post_id) }}">{{ comment.title }}</a> · {{ comment.created_at }}</span>
 </div>
 {% else %}
 <p class="muted">No comments yet.</p>

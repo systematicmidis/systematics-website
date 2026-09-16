@@ -18,13 +18,13 @@
   <div class="post-body">
     <h2>{{ item.title }}</h2>
     <p>{{ item.content[:500] }}{% if item.content|length > 500 %}…{% endif %}</p>
-    {% if item.content|length > 500 %}<a class="post-link" href="{{ url_for('post', slug=item.slug) }}">Read more</a>{% endif %}
+    {% if item.content|length > 500 %}<a class="post-link" href="{{ url_for('post', post_id=item.id) }}">Read more</a>{% endif %}
   </div>
   <div class="post-actions">
-    <span>💬 <a href="{{ url_for('post', slug=item.slug) }}#comments">Comment</a></span>
+    <span>💬 <a href="{{ url_for('post', post_id=item.id) }}#comments">Comment</a></span>
     <span>＋1</span><span>↗ Share</span>
   </div>
-  <div class="comment-preview"><a href="{{ url_for('post', slug=item.slug) }}#comments">View comments</a></div>
+  <div class="comment-preview"><a href="{{ url_for('post', post_id=item.id) }}#comments">View comments</a></div>
 </article>
 {% else %}<div class="empty">No posts yet.</div>{% endfor %}
 {% endblock %}

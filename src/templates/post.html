@@ -47,7 +47,7 @@
     </form>
     {% else %}
       <div class="login-to-comment">
-        <a href="{{ url_for('login', next=url_for('post', slug=post.slug) + '#comments') }}">Sign in</a>
+        <a href="{{ url_for('login', next=url_for('post', post_id=post.id) + '#comments') }}">Sign in</a>
         or <a href="{{ url_for('register') }}">create an account</a> to comment.
       </div>
     {% endif %}

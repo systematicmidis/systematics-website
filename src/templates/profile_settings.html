@@ -8,9 +8,45 @@
     <label>Username<input value="{{ user.username }}" disabled></label>
     <label>User ID<input value="{{ user.user_id }}" disabled></label>
     <label>Display name<input name="display_name" maxlength="40" value="{{ user.display_name }}" required></label>
-    <label>New profile picture
-      <input type="file" name="profile_picture" accept="image/png,image/jpeg,image/gif,image/webp">
+    <label>Bio
+      <textarea name="bio" rows="4" maxlength="{{ max_bio_length }}" placeholder="Tell people about your Black MIDI projects...">{{ user.bio or '' }}</textarea>
+      <small>Up to {{ max_bio_length }} characters.</small>
     </label>
+
+    <div class="setting-block">
+      <div class="setting-visual">
+        {% if user.banner %}
+          <img class="setting-banner" src="{{ url_for('uploads', filename=user.banner) }}" alt="Your current banner">
+        {% else %}
+          <div class="setting-banner setting-banner-empty">Default banner</div>
+        {% endif %}
+      </div>
+      <label>New banner
+        <input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp">
+        <small>Stretched across the top of your profile. Wide images (around 4:1) look best. Up to 1.8 MB.</small>
+      </label>
+      {% if user.banner %}
+        <label class="checkbox"><input type="checkbox" name="remove_banner" value="1"> Remove my banner</label>
+      {% endif %}
+    </div>
+
+    <div class="setting-block">
+      <div class="setting-visual">
+        {% if user.profile_picture %}
+          <img class="setting-avatar" src="{{ url_for('uploads', filename=user.profile_picture) }}" alt="Your current profile picture">
+        {% else %}
+          <div class="setting-avatar setting-avatar-empty">{{ user.display_name[:1]|upper }}</div>
+        {% endif %}
+      </div>
+      <label>New profile picture
+        <input type="file" name="profile_picture" accept="image/png,image/jpeg,image/gif,image/webp">
+        <small>PNG, JPG, GIF, or WebP, up to 1.8 MB. Square images work best.</small>
+      </label>
+      {% if user.profile_picture %}
+        <label class="checkbox"><input type="checkbox" name="remove_profile_picture" value="1"> Remove my picture</label>
+      {% endif %}
+    </div>
+
     <button type="submit">Save changes</button>
   </form>
 </div>
