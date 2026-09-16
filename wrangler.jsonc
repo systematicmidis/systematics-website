@@ -15,11 +15,5 @@
       "database_name": "systematics-black-midi-db",
       "database_id": "cb486eb8-32f7-40f2-9a2b-d50968e12a90"
     }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "BUCKET",
-      "bucket_name": "systematics-black-midi-files"
-    }
   ]
 }
