@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Create account · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <h1>Create your account</h1>
+  <p class="muted">Join the Black MIDI community and comment using your own profile.</p>
+  <form method="post" enctype="multipart/form-data">
+    <label>Username
+      <input name="username" maxlength="24" placeholder="BlackMIDI_Fan" required>
+      <small>3–24 letters, numbers, or underscores. This becomes part of your profile URL.</small>
+    </label>
+    <label>Display name
+      <input name="display_name" maxlength="40" placeholder="Black MIDI Fan" required>
+    </label>
+    <label>Password
+      <input type="password" name="password" minlength="8" required>
+    </label>
+    <label>Confirm password
+      <input type="password" name="confirm_password" minlength="8" required>
+    </label>
+    <label>Profile picture
+      <input type="file" name="profile_picture" accept="image/png,image/jpeg,image/gif,image/webp">
+      <small>PNG, JPG, GIF, or WebP.</small>
+    </label>
+    <button type="submit">Create account</button>
+  </form>
+  <p class="auth-bottom">Already have an account? <a href="{{ url_for('login') }}">Sign in</a>.</p>
+</div>
+{% endblock %}

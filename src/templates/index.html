@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Systematics Black Midi site</h1>
+  <p>My Black MIDI projects and what I'm working on next.</p>
+</div>
+{% for item in posts %}
+<article class="post-card">
+  <div class="post-head">
+    <div class="avatar site-avatar">BM</div>
+    <div class="post-author">
+      <strong>Systematics Black Midi site</strong>
+      <span>Public · {{ item.created_at[:10] }}</span>
+    </div>
+    <button class="more">⋮</button>
+  </div>
+  <div class="post-body">
+    <h2>{{ item.title }}</h2>
+    <p>{{ item.content[:500] }}{% if item.content|length > 500 %}…{% endif %}</p>
+    {% if item.content|length > 500 %}<a class="post-link" href="{{ url_for('post', slug=item.slug) }}">Read more</a>{% endif %}
+  </div>
+  <div class="post-actions">
+    <span>💬 <a href="{{ url_for('post', slug=item.slug) }}#comments">Comment</a></span>
+    <span>＋1</span><span>↗ Share</span>
+  </div>
+  <div class="comment-preview"><a href="{{ url_for('post', slug=item.slug) }}#comments">View comments</a></div>
+</article>
+{% else %}<div class="empty">No posts yet.</div>{% endfor %}
+{% endblock %}

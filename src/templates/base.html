@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Systematics Black Midi site{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="{{ url_for('home') }}">Black MIDI</a>
+    <nav>
+      <a href="{{ url_for('home') }}">Home</a>
+      {% if current_user %}
+        <a href="{{ url_for('profile', username=current_user.username) }}">{{ current_user.display_name }}</a>
+        <a href="{{ url_for('profile_settings') }}">Profile</a>
+        <a href="{{ url_for('logout') }}">Sign out</a>
+      {% else %}
+        <a href="{{ url_for('login') }}">Sign in</a>
+        <a href="{{ url_for('register') }}">Join</a>
+      {% endif %}
+      {% if is_admin %}<a href="{{ url_for('admin') }}">Manage</a>{% else %}<a href="{{ url_for('admin_login') }}">Admin</a>{% endif %}
+    </nav>
+  </div>
+</header>
+<div class="page-shell">
+  <aside class="sidebar">
+    <a class="side-link active" href="{{ url_for('home') }}">⌂ &nbsp; Home</a>
+    <a class="side-link" href="{{ url_for('home') }}">♪ &nbsp; Black MIDI</a>
+    <a class="side-link" href="{{ url_for('home') }}">▶ &nbsp; Videos</a>
+    <a class="side-link" href="{{ url_for('home') }}">★ &nbsp; Projects</a>
+    {% if current_user %}
+      <a class="side-link" href="{{ url_for('profile', username=current_user.username) }}">● &nbsp; My profile</a>
+    {% endif %}
+    <div class="sidebar-note">
+      <strong>Systematics Black Midi site</strong>
+      <p>Projects, huge MIDI experiments, upcoming videos and progress updates.</p>
+    </div>
+  </aside>
+  <main class="feed">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <aside class="right-space"></aside>
+</div>
+<footer>Systematics Black Midi site · A personal project feed</footer>
+</body>
+</html>

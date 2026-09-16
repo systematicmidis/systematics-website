@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Admin · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="admin-header">
+  <div>
+    <p class="eyebrow">CONTROL PANEL</p>
+    <h1>Manage your site</h1>
+  </div>
+  <a class="button" href="{{ url_for('new_post') }}">+ New post</a>
+</div>
+
+<section>
+  <div class="section-heading"><h2>Posts</h2><span>{{ posts|length }}</span></div>
+  {% for item in posts %}
+  <div class="admin-row">
+    <div>
+      <strong>{{ item.title }}</strong>
+      <small>{{ item.status }} · {{ item.created_at }}</small>
+    </div>
+    <div class="actions">
+      <a href="{{ url_for('post', slug=item.slug) }}">View</a>
+      <a href="{{ url_for('edit_post', post_id=item.id) }}">Edit</a>
+      <form method="post" action="{{ url_for('delete_post', post_id=item.id) }}" onsubmit="return confirm('Delete this post and its comments?')">
+        <button class="danger" type="submit">Delete</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</section>
+
+<section id="comments" class="admin-comments">
+  <div class="section-heading"><h2>Recent comments</h2><span>{{ comments|length }}</span></div>
+  {% for comment in comments %}
+  <div class="admin-row">
+    <div>
+      <strong>{{ comment.display_name }}</strong>
+      <small>on {{ comment.post_title }} · {{ comment.created_at }}</small>
+      <p>{{ comment.content }}</p>
+    </div>
+    <form method="post" action="{{ url_for('delete_comment', comment_id=comment.id) }}">
+      <button class="danger" type="submit">Delete</button>
+    </form>
+  </div>
+  {% else %}
+    <p class="muted">No comments yet.</p>
+  {% endfor %}
+</section>
+{% endblock %}
