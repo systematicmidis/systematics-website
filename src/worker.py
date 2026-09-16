@@ -89,8 +89,10 @@ app = Flask(__name__, template_folder=str(TEMPLATE_DIR), static_folder=None)
 # Upload limits. D1 caps a row (and therefore an image) at 2 MB, and MAX_IMAGE_BYTES
 # stays under that with room for the other columns. MAX_CONTENT_LENGTH is only a
 # backstop for absurd request bodies; valid-but-too-big images get a flash message
-# from the per-image check instead of a bare 413.
-MAX_IMAGE_BYTES = 1_800_000
+# from the per-image check instead of a bare 413. Images near the cap cost roughly
+# a second of CPU to accept on the Free plan (see save_image_upload), so this is
+# deliberately a little under the D1 row limit rather than right at it.
+MAX_IMAGE_BYTES = 1_700_000
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
 
 # Sessions are browser-scoped cookies by default: closing the browser signs you
@@ -889,10 +891,26 @@ def save_image_upload(file):
         return None, f"Images must be {MAX_IMAGE_BYTES // 1000} KB or smaller."
     filename = secrets.token_hex(16) + "." + ext
     content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-    execute(
-        "INSERT INTO uploads (filename, content_type, size, data) VALUES (?, ?, ?, ?)",
-        filename, content_type, len(data), to_js(data),
-    )
+    try:
+        # Hand the raw bytes to D1 - do NOT wrap them in to_js() first. A
+        # converted value arrives as a typed array, and the Workers RPC layer
+        # then walks it element by element to check it can be sent, which cost
+        # ~2 s of CPU for a 600 KB image. That blew the runtime's CPU budget and
+        # made any upload above roughly 100 KB fail with Cloudflare Error 1101
+        # ("Worker threw exception") or 1102, straight past the flash message.
+        # Plain Python bytes are not walked, and D1 stores them as a BLOB.
+        execute(
+            "INSERT INTO uploads (filename, content_type, size, data) VALUES (?, ?, ?, ?)",
+            filename, content_type, len(data), data,
+        )
+    except Exception as exc:
+        # Storing the image is best-effort: never let it take the whole request
+        # down with a runtime error page when we can say what happened instead.
+        app.logger.warning("Could not store upload %s (%d bytes): %s", filename, len(data), exc)
+        return None, (
+            "That image was too big for the site to process. Try one under "
+            f"{MAX_IMAGE_BYTES // 1000} KB."
+        )
     return filename, None
 
 
@@ -1462,4 +1480,68 @@ def too_large(error):
     return redirect(request.referrer or url_for("home"))
 
 
-Default = wsgi.entrypoint(app)
+# Shown when a request dies in a way Flask never sees. The runtime raises its
+# own CpuLimitExceeded, which is not an Exception subclass, so it sails straight
+# past Flask's error handling and out of the Worker - which the outside world
+# sees as Cloudflare's bare "error code: 1101" page. Catching BaseException here
+# gives the visitor a sentence instead of that, and puts the traceback in the
+# Worker log (wrangler tail) where it can be read.
+FALLBACK_ERROR_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Something went wrong</title>
+<style>
+  body { font: 16px/1.6 system-ui, sans-serif; margin: 0; padding: 3rem 1.5rem;
+         background: #14161c; color: #e8eaf0; text-align: center; }
+  .card { max-width: 34rem; margin: 0 auto; background: #1c1f27;
+          border: 1px solid #2b3040; border-radius: 12px; padding: 2rem; }
+  h1 { font-size: 1.35rem; margin: 0 0 .75rem; }
+  p { color: #b6bccb; margin: .5rem 0 1.25rem; }
+  a { color: #8ab4ff; }
+</style></head>
+<body><div class="card">
+<h1>The server could not finish that request</h1>
+<p>Sorry - something went wrong on our side. Please try again. If you were
+uploading a picture, a smaller image will go through.</p>
+<p><a href="/">Back to the feed</a></p>
+</div></body></html>"""
+
+
+class UnhandledErrorPage:
+    """Last-chance WSGI wrapper: log the crash, answer with a readable page."""
+
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def _report(self, exc, environ):
+        try:
+            app.logger.error(
+                "Unhandled error on %s %s: %s: %s",
+                environ.get("REQUEST_METHOD"), environ.get("PATH_INFO"),
+                type(exc).__name__, exc, exc_info=True,
+            )
+        except Exception:  # logging must never mask the original failure
+            pass
+
+    def __call__(self, environ, start_response):
+        try:
+            # Materialise the response inside the guard: iterating it later is
+            # what actually runs the view for some response types.
+            result = list(self.wsgi_app(environ, start_response))
+        except BaseException as exc:
+            self._report(exc, environ)
+            body = FALLBACK_ERROR_PAGE.encode()
+            headers = [("Content-Type", "text/html; charset=utf-8"),
+                       ("Content-Length", str(len(body))),
+                       ("Cache-Control", "no-store")]
+            try:
+                start_response("500 Internal Server Error", headers)
+            except Exception:
+                # The status line was already sent, so there is nothing left to
+                # say; end the body rather than emitting a second header block.
+                return []
+            return [body]
+        return result
+
+
+Default = wsgi.entrypoint(UnhandledErrorPage(app))

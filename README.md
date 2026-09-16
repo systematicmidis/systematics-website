@@ -285,9 +285,24 @@ dropped in `0003_posts_use_ids.sql`, so old slug URLs now 404. The post editor n
 - **Uploads are D1 rows**, not files and not R2 (`0005_uploads_in_d1.sql`): the `uploads`
   table holds the bytes as a BLOB, and `/uploads/<file>` serves them with an immutable
   cache header. D1 caps a row at 2 MB, so images are limited to `MAX_IMAGE_BYTES`
-  (1.8 MB) and to png/jpg/jpeg/gif/webp; anything else - or anything larger - is refused
+  (1.7 MB) and to png/jpg/jpeg/gif/webp; anything else - or anything larger - is refused
   with a flash message instead of being dropped silently. Browsers cache the images, so a
   page view does not re-read every avatar.
+- **Bind image bytes to D1 as plain Python `bytes`.** Not wrapping them in `to_js()` first is
+  what makes uploads work at all. A converted value reaches the Workers RPC layer as a typed
+  array, and `rpc.python_to_rpc()` walks it element by element to prove it can be sent -
+  measured at roughly 3.5 us per byte, i.e. **~2.2 s of CPU for a 600 KB image**. That blew
+  the runtime's CPU budget, and because the failure happens inside the runtime rather than in
+  Flask it surfaced as Cloudflare's bare `error code: 1101` (or 1102) page instead of a
+  flash: every image above roughly 100 KB failed, and 100 KB itself failed about half the
+  time. Raw bytes are not walked, and D1 stores them as a BLOB just the same - the insert
+  dropped from 2.2 s to **86 ms** for the same 600 KB. Never hand a converted
+  `to_js(...)` blob to `stmt.bind()`.
+- **An uncaught runtime error still answers with a page.** `UnhandledErrorPage` wraps the
+  WSGI app: the runtime's `CpuLimitExceeded` derives from `BaseException`, so it never
+  reaches Flask's error handling, and the visitor used to get Cloudflare's `1101` page. The
+  wrapper logs the traceback (readable in `wrangler tail`) and returns a small 500 page.
+  Anything Flask does catch is unaffected.
 - **Why not R2?** It is the better home for blobs and the free tier is generous, but
   enabling it means completing an R2 subscription checkout, i.e. putting a payment method
   on the account. Everything in this project runs on D1, which does not.
@@ -330,9 +345,9 @@ What was measured on this project (local `pywrangler dev`, wall time per request
 | Request (local `pywrangler dev`) | Cost |
 | --- | --- |
 | Page render (`/`, `/post/1`) | ~15-25 ms |
-| Settings save with no image | ~25 ms |
-| Settings save with a 10 KB image | ~70 ms (+~4 ms per KB) |
-| ... 100 KB / 400 KB / 1.7 MB image | ~0.32 s / ~1.3 s / ~6.2 s |
+| Sign-up with no image | ~86 ms |
+| Sign-up with a 10 KB / 100 KB image | ~83 ms / ~103 ms |
+| Sign-up with a 400 KB / 1.6 MB image | ~181 ms / ~1.46 s |
 
 Measured on the deployed Worker instead (CPU time from `wrangler tail`), which is the
 number that actually matters:
@@ -341,23 +356,25 @@ number that actually matters:
 | --- | --- |
 | Page renders, static assets, `/uploads/*` | 6-32 ms CPU, all served (the runtime allows occasional overshoot) |
 | Sign-in (100,000-iteration PBKDF2) | served, no CPU error |
-| 10 KB and 100 KB image uploads | served |
-| 500 KB and 1.7 MB image uploads | **`error code: 1102`** |
+| Sign-up with a 100 KB / 300 KB / 600 KB image | served: 269 / 117 / 149 ms CPU |
+| Sign-up with a 1.2 MB image | served: 664 ms CPU |
+| Sign-up with an image above the cap (1.75 MB, 5 MB) | friendly flash, not an error page |
+| Image served back from D1 (`/uploads/*`) | 200, byte-identical, including at 1.3 MB |
 
-So uploads are the only thing the free plan actually refuses, and the practical ceiling sits
-somewhere between 100 KB and 500 KB. Keep avatars and banners small (a few tens of KB), or
-resize them in the browser before uploading, and the whole site runs free.
+So nothing here is refused outright on the free plan any more: images up to
+`MAX_IMAGE_BYTES` are accepted, stored and served, and the runtime simply runs well past the
+10 ms budget while doing it. Keep avatars and banners reasonably small anyway - a 1.6 MB
+upload costs over a second of CPU, and that budget is not unlimited.
 
 Two consequences:
 
 - Password hashing is no longer the problem: native WebCrypto brought a sign-in down to
   roughly the cost of rendering a page (it used to be ~0.35 s and dominate everything).
-- **Image uploads are the expensive part**, because Werkzeug parses the multipart body in
-  Python. On the free plan expect uploads to be the first thing to hit
-  `Error 1102 - Worker exceeded resource limits` (shown as `exceededCpu` under
-  Metrics > Errors); on Workers Paid the 30 s CPU default handles them comfortably.
-  Keeping images small helps a lot, and resizing them in the browser before upload would
-  help more.
+- **Image uploads are still the expensive part**, because the bytes are read and stored in
+  Python. What the `to_js` fix removed was an accidental per-byte RPC cost, not the cost of
+  the data itself, so a 1.6 MB upload still costs over a second of CPU. A request body above
+  `MAX_CONTENT_LENGTH` (4 MB) is refused with a flash before Flask ever parses it.
+  On Workers Paid the 30 s CPU default handles all of this comfortably.
 
 If pages themselves start erroring with 1102, the options are Workers Paid ($5/month, which
 also raises the limit via `"limits": { "cpu_ms": 30000 }`), or moving the app to a host that
