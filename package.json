@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "deploy": "pywrangler deploy",
+    "dev": "pywrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": "latest"
+  }
+}
