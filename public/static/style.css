@@ -238,7 +238,8 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .site-avatar { background:#555; }
 .login-to-comment { margin-top:15px; padding:14px; background:#f7f7f7; border:1px solid #e4e4e4; color:#777; }
 .profile-card { background:#fff; border:1px solid #d5d5d5; box-shadow:0 1px 2px rgba(0,0,0,.08); margin-bottom:18px; }
-.profile-cover { height:105px; background:linear-gradient(135deg,#555,#888); }
+.profile-cover { height:105px; background:linear-gradient(135deg,#555,#888); position:relative; overflow:hidden; }
+.profile-banner { display:block; width:100%; height:100%; object-fit:cover; }
 .profile-info { position:relative; padding:0 22px 24px; }
 .profile-avatar { width:92px; height:92px; margin-top:-46px; border:4px solid #fff; border-radius:50%; background:#555; color:#fff; display:flex; align-items:center; justify-content:center; font-size:32px; font-weight:bold; object-fit:cover; }
 .profile-info h1 { margin:8px 0 0; font-size:28px; font-weight:400; }
@@ -254,3 +255,27 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
   .topbar { height:auto; min-height:54px; }
   .topbar nav { padding:7px 0; flex-wrap:wrap; }
 }
+
+.profile-bio {
+  margin:10px 0 0;
+  max-width:560px;
+  color:#555;
+  line-height:1.55;
+  white-space:pre-wrap;
+}
+
+.setting-block { margin-top:20px; padding-top:16px; border-top:1px solid #eee; }
+.setting-block label { display:block; margin:12px 0 0; }
+.setting-visual { margin-top:4px; }
+.setting-banner {
+  display:block; width:100%; max-width:340px; height:85px; object-fit:cover;
+  border:1px solid #d5d5d5; background:linear-gradient(135deg,#555,#888);
+}
+.setting-banner-empty { display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; }
+.setting-avatar {
+  display:block; width:72px; height:72px; border:1px solid #d5d5d5; border-radius:50%;
+  background:#555; color:#fff; object-fit:cover;
+}
+.setting-avatar-empty { display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:bold; }
+.checkbox { display:block; margin-top:10px; color:#777; }
+.checkbox input[type=checkbox] { width:auto; margin-right:6px; vertical-align:middle; }
