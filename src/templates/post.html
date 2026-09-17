@@ -10,7 +10,7 @@
       <a href="{{ url_for('profile', username=comment.username) }}"><strong>{{ comment.display_name }}</strong></a>
       <span>@{{ comment.username }} · {{ comment.created_at }}</span>
     </div>
-    <p>{{ comment.content }}</p>
+    <p>{{ comment.content|linkify }}</p>
     {% if viewer %}
       <details class="reply-box">
         <summary>Reply</summary>
@@ -61,7 +61,7 @@
   </div>
   <div class="post-body">
     <h1>{{ post.title }}</h1>
-    <div class="post-content">{{ post.content }}</div>
+    <div class="post-content">{{ post.content|linkify }}</div>
     {{ link_card(post) }}
   </div>
   {{ vote_bar(post) }}

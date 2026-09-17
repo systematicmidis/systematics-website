@@ -34,6 +34,7 @@ from flask import (
     session, url_for,
 )
 from flask.sessions import SecureCookieSessionInterface
+from markupsafe import Markup
 from pyodide.ffi import run_sync, to_js as _to_js
 from werkzeug.security import check_password_hash
 from werkzeug.utils import secure_filename
@@ -632,6 +633,60 @@ ATTR_RE = re.compile(
 )
 TITLE_TAG_RE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"'\]\[]+", re.IGNORECASE)
+
+
+# Hyperlinks in user text -----------------------------------------------------
+# Post bodies, comments and bios are plain text. Everything a person typed is
+# escaped, and only whole URLs become anchors, so a body containing markup is
+# still shown as the characters somebody wrote instead of being rendered.
+# ``www.`` is matched as well as a scheme: people paste "www.mediafire.com/..."
+# and expect it to be clickable.
+LINK_IN_TEXT_RE = re.compile(r"(?:https?://|www\.)[^\s<>\"']+", re.IGNORECASE)
+# Sentence punctuation sitting at the end of a match belongs to the sentence,
+# not to the URL ("...download it at https://example.com/x.").
+LINK_TRAILING_PUNCTUATION = ".,;:!?'\")"
+
+
+def linkify(value, limit=None):
+    """Escape plain text and turn the URLs in it into links.
+
+    Registered as the Jinja filter ``linkify``, so the returned ``Markup`` is
+    safe to render: the escaping happens here, over every piece of the string,
+    before any of it is marked up.
+
+    ``limit`` renders an excerpt, which is what the feed shows. A URL that runs
+    to the edge of the excerpt is left as plain text rather than linked, since
+    half a URL is a broken link.
+    """
+    text = value or ""
+    cut = limit is not None and len(text) > limit
+    if cut:
+        text = text[:limit]
+    parts = []
+    position = 0
+    for match in LINK_IN_TEXT_RE.finditer(text):
+        url = match.group(0).rstrip(LINK_TRAILING_PUNCTUATION)
+        if len(url) < 8:  # "http://" with nothing after it is not a link
+            continue
+        if cut and match.end() == len(text):
+            parts.append(html.escape(text[position:]))
+            return Markup("".join(parts))
+        href = url if url[:4].lower() == "http" else "https://" + url
+        parts.append(html.escape(text[position:match.start()]))
+        parts.append(
+            '<a class="auto-link" href="{0}" target="_blank"'
+            ' rel="noopener noreferrer nofollow">{1}</a>{2}'.format(
+                html.escape(href, quote=True),
+                html.escape(url),
+                html.escape(match.group(0)[len(url):]),
+            )
+        )
+        position = match.end()
+    parts.append(html.escape(text[position:]))
+    return Markup("".join(parts))
+
+
+app.jinja_env.filters["linkify"] = linkify
 
 
 def http_fetch():

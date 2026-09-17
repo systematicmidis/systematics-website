@@ -151,6 +151,33 @@ web server. Facts worth knowing:
   `MAX_LINK_REFRESH_PER_RUN`, 20 per run - the Free plan allows 50 subrequests per
   invocation). This is how posts written before this feature existed get their cards.
 
+**Links in text are clickable.** A URL written in a post, a comment or a bio is turned into a
+real hyperlink when the page is rendered, so `Check https://mediafire.com/file/...` is
+clickable without anybody typing HTML. `www.something.com` is linked too (the link is
+given an `https://` scheme). Two details:
+
+- Everything else in the body is escaped, so a post containing `<b>` or `<script>` shows
+  those characters as text. That is `linkify()` in `src/worker.py`, registered as a Jinja
+  filter - the escaping happens there, over each piece of the string, before any anchor is
+  inserted.
+- The feed shows the first 500 characters of a post, and a URL that runs to that cut is left
+  as plain text rather than linked: half a URL is a broken link.
+
+## Mobile layout
+
+The page fits a phone without sideways scrolling, and the two things that used to break that
+are worth keeping in mind when editing `public/static/style.css`:
+
+- **A grid track of `1fr` cannot shrink below its widest unbreakable content.** The mobile
+  layout uses `minmax(0, 1fr)` for the feed column, so one pasted URL does not stretch the
+  page to thousands of pixels wide. Use `minmax(0, ...)` whenever a grid column holds
+  user-written text.
+- **User text needs `overflow-wrap:anywhere`** (set on post bodies, comments, bios and link
+  cards), because a URL or a filename has no break opportunity for the browser to use.
+
+The home page tabs wrap onto a second row under 560px, the feed/sidebar collapse into one
+column under 850px, and the sticky header is compacted on small screens.
+
 ## Followers and profiles
 
 The site is built as a Google+-style network: profiles have a cover, an About block and

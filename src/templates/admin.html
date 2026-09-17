@@ -47,7 +47,7 @@
     <div>
       <strong>{{ comment.display_name }}</strong>
       <small>on {{ comment.post_title }} · {{ comment.created_at }}</small>
-      <p>{{ comment.content }}</p>
+      <p>{{ comment.content|linkify }}</p>
     </div>
     <form method="post" action="{{ url_for('delete_comment', comment_id=comment.id) }}">
       <button class="danger" type="submit">Delete</button>

@@ -67,7 +67,7 @@
   <div class="person-main">
     <a href="{{ url_for('profile', username=person.username) }}"><strong>{{ person.display_name }}</strong></a>
     <span class="person-meta">@{{ person.username }} · {{ person.follower_count }} follower{% if person.follower_count != 1 %}s{% endif %} · {{ person.post_count }} post{% if person.post_count != 1 %}s{% endif %}</span>
-    {% if person.bio %}<p class="person-bio">{{ person.bio[:160] }}{% if person.bio|length > 160 %}…{% endif %}</p>{% endif %}
+    {% if person.bio %}<p class="person-bio">{{ person.bio|linkify(160) }}{% if person.bio|length > 160 %}…{% endif %}</p>{% endif %}
   </div>
   {{ follow_button(person, following, next_url) }}
 </div>
@@ -97,7 +97,7 @@
   </div>
   <div class="post-body">
     <h2><a href="{{ url_for('post', post_id=post.id) }}">{{ post.title }}</a></h2>
-    <p>{{ post.content[:500] }}{% if post.content|length > 500 %}…{% endif %}</p>
+    <p>{{ post.content|linkify(500) }}{% if post.content|length > 500 %}…{% endif %}</p>
     {{ link_card(post, compact=true) }}
     {% if post.content|length > 500 %}<a class="post-link" href="{{ url_for('post', post_id=post.id) }}">Read more</a>{% endif %}
   </div>
