@@ -429,3 +429,5 @@ accounts - and it uses Werkzeug's `generate_password_hash`, so accounts it creat
 hashes that the Worker cannot verify (Pyodide has no OpenSSL KDFs). Sign-in works one way
 only: hashes written by the Worker are readable by `app.py`, not the reverse. Create accounts
 through the Worker if you plan to deploy them.
+
+Systematic wrote this
