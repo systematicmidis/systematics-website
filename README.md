@@ -29,7 +29,8 @@ app.py                Original plain-Flask/SQLite version of the app (local only
 
 ## Prerequisites
 
-- **Node.js 20+** and npm - `pywrangler` shells out to `npx wrangler`.
+- **Node.js 22+** and npm - `pywrangler` shells out to `npx wrangler`, and wrangler
+  refuses to start on Node 20 (`Wrangler requires at least Node.js v22.0.0`).
 - **uv** - the Python toolchain pywrangler uses. Windows:
   `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
   (or `winget install --id=astral-sh.uv`).
