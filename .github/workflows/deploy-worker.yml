@@ -1,0 +1,79 @@
+name: Deploy Worker
+
+# Replaces the Workers Builds Git integration, which cannot build this Worker:
+# its build image is Node-based and its default commands (`npm run build`,
+# `npx wrangler deploy`) never vendor Flask into python_modules/. That folder is
+# gitignored, so a fresh checkout never has it - and a bare `wrangler deploy`
+# uploads the Worker without Flask in it.
+#
+# The Python toolchain has to run, and pywrangler is what runs it:
+# `pywrangler deploy` syncs the Pyodide builds of the pyproject.toml
+# dependencies and then hands off to wrangler.
+#
+# Once this workflow is green, disconnect the dashboard integration so the
+# failing "Workers Builds: systematic-bm" check goes away:
+#   Workers & Pages > systematics-bm > Settings > Builds > Disconnect
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time. A newer push supersedes a queued one, but never
+# interrupts an upload that is already running.
+concurrency:
+  group: deploy-worker-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: uv run pywrangler deploy
+    runs-on: ubuntu-latest
+    env:
+      # Read by wrangler. Add both under Settings > Secrets and variables >
+      # Actions > New repository secret:
+      #   CLOUDFLARE_API_TOKEN   - the "Edit Cloudflare Workers" template is enough
+      #   CLOUDFLARE_ACCOUNT_ID  - dashboard sidebar, or `npx wrangler whoami`
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      # pywrangler shells out to `npx wrangler`, so Node and node_modules come
+      # with it. The lockfile pins the wrangler version the project was checked
+      # against.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install the Python toolchain and local wrangler
+        run: |
+          uv sync --group dev
+          npm ci
+
+      - name: Fail early if the Cloudflare credentials are missing
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as repository secrets."
+            exit 1
+          fi
+
+      # Cheap guard so a syntax error is reported as itself instead of as a
+      # deploy failure. compileall only parses, it never runs the module.
+      - name: Byte-compile the Worker sources
+        run: uv run python -m compileall -q src
+
+      # wrangler.jsonc declares secrets.required, so this also refuses to run
+      # until SESSION_SECRET and ADMIN_PASSWORD exist on the Worker. Set them
+      # once with `npx wrangler secret put <NAME>`.
+      - name: Deploy
+        run: uv run pywrangler deploy
