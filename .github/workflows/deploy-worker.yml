@@ -75,11 +75,13 @@ jobs:
       - name: Byte-compile the Worker sources
         run: uv run python -m compileall -q src
 
-      # A failed deploy says only "exit code 1", which does not name the missing
-      # permission. This prints the token's own view of itself first, so the log
-      # of a failed run says whether the token is invalid, belongs to another
-      # account, or is simply missing Workers Scripts: Edit.
+      # Prints the token's own view of itself, because a failed deploy says only
+      # "exit code 1". Deliberately non-fatal: `wrangler whoami` exits non-zero
+      # for a correct account-scoped token (enumerating memberships is a
+      # user-level permission such a token does not have), so letting it gate the
+      # deploy would hide the real failure behind a diagnostic.
       - name: Show what the API token is allowed to do
+        continue-on-error: true
         run: |
           echo "--- token status:"
           curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
@@ -92,4 +94,22 @@ jobs:
       # until SESSION_SECRET and ADMIN_PASSWORD exist on the Worker. Set them
       # once with `npx wrangler secret put <NAME>`.
       - name: Deploy
-        run: uv run pywrangler deploy
+        run: |
+          set -o pipefail
+          log="$RUNNER_TEMP/deploy.log"
+          if uv run pywrangler deploy 2>&1 | tee "$log"; then
+            exit 0
+          fi
+
+          # Repeat the tail of the failure as an annotation. A step log has to be
+          # fetched with a token, but annotations are readable from the Checks API
+          # and appear on the commit, so the reason for a failure stays visible to
+          # anyone who can see the check.
+          # Join the lines first, then escape: `sed -e s/%/%25/g` only touches the
+          # line in hand, so escaping before the N loop would miss every line after
+          # the first. Percent must be escaped before newlines become %0A.
+          tail -n 25 "$log" \
+            | sed -e ':a' -e 'N' -e '$!ba' -e 's/%/%25/g' -e 's/\r//g' -e 's/\n/%0A/g' \
+            > "$RUNNER_TEMP/tail.txt"
+          echo "::error::$(cat "$RUNNER_TEMP/tail.txt")"
+          exit 1
