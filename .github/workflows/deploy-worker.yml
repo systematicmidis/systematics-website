@@ -75,6 +75,19 @@ jobs:
       - name: Byte-compile the Worker sources
         run: uv run python -m compileall -q src
 
+      # A failed deploy says only "exit code 1", which does not name the missing
+      # permission. This prints the token's own view of itself first, so the log
+      # of a failed run says whether the token is invalid, belongs to another
+      # account, or is simply missing Workers Scripts: Edit.
+      - name: Show what the API token is allowed to do
+        run: |
+          echo "--- token status:"
+          curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            https://api.cloudflare.com/client/v4/user/tokens/verify
+          echo
+          echo "--- accounts and permissions this token can see:"
+          npx wrangler whoami
+
       # wrangler.jsonc declares secrets.required, so this also refuses to run
       # until SESSION_SECRET and ADMIN_PASSWORD exist on the Worker. Set them
       # once with `npx wrangler secret put <NAME>`.
