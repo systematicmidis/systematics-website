@@ -7,11 +7,14 @@
   {{ small_avatar(comment.profile_picture, comment.display_name) }}
   <div class="comment-main">
     <div class="comment-meta">
-      <a href="{{ url_for('profile', username=comment.username) }}"><strong>{{ comment.display_name }}</strong></a>
-      <span>@{{ comment.username }} · {{ comment.created_at }}</span>
+      {# Deleted accounts keep their comments, with no profile to open and no
+         released handle to show. #}
+      {% if comment.author_deleted %}<strong>{{ comment.display_name }}</strong>
+      {% else %}<a href="{{ url_for('profile', username=comment.username) }}"><strong>{{ comment.display_name }}</strong></a>
+      <span>@{{ comment.username }} · {{ comment.created_at }}</span>{% endif %}
     </div>
     <p>{{ comment.content|linkify }}</p>
-    {% if viewer %}
+    {% if viewer and not my_bans.comment %}
       <details class="reply-box">
         <summary>Reply</summary>
         <form class="comment-form compact" method="post">
@@ -39,7 +42,7 @@
     {% if post.author_username %}
       {{ avatar(post.author_picture, post.author_display_name) }}
       <div class="post-author">
-        <strong><a href="{{ url_for('profile', username=post.author_username) }}">{{ post.author_display_name }}</a></strong>
+        <strong>{% if post.author_deleted %}{{ post.author_display_name }}{% else %}<a href="{{ url_for('profile', username=post.author_username) }}">{{ post.author_display_name }}</a>{% endif %}</strong>
         <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}{% if post.status != 'published' %} · {{ post.status }}{% endif %}</span>
       </div>
     {% else %}
@@ -75,14 +78,18 @@
     {% endfor %}
 
     {% if current_user %}
-    <form class="comment-form" method="post">
-      {{ small_avatar(current_user.profile_picture, current_user.display_name) }}
-      <div class="comment-inputs">
-        <textarea name="content" maxlength="2000" rows="3"
-                  placeholder="Write a comment as {{ current_user.display_name }}..." required></textarea>
-        <button type="submit">Post comment</button>
-      </div>
-    </form>
+      {% if my_bans.comment %}
+        <div class="login-to-comment banned">{{ ban_message('comment', my_bans.comment) }}</div>
+      {% else %}
+      <form class="comment-form" method="post">
+        {{ small_avatar(current_user.profile_picture, current_user.display_name) }}
+        <div class="comment-inputs">
+          <textarea name="content" maxlength="2000" rows="3"
+                    placeholder="Write a comment as {{ current_user.display_name }}..." required></textarea>
+          <button type="submit">Post comment</button>
+        </div>
+      </form>
+      {% endif %}
     {% else %}
       <div class="login-to-comment">
         <a href="{{ url_for('login', next=url_for('post', post_id=post.id) + '#comments') }}">Sign in</a>

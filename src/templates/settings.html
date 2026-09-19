@@ -58,6 +58,32 @@
       <a class="button" href="{{ url_for('followers', username=current_user.username) }}">My followers</a>
       <a class="button" href="{{ url_for('logout') }}">Sign out</a>
     </div>
+
+    {% if my_bans %}
+      <div class="ban-panel">
+        <h3>Restrictions on your account</h3>
+        <ul>
+          {% for kind, info in my_bans.items() %}
+            <li>{{ ban_message(kind, info) }}
+              {%- if kind == 'comment' %} You can still read and write posts.
+              {%- elif kind == 'post' %} You can still read and comment.
+              {%- endif %}</li>
+          {% endfor %}
+        </ul>
+        <p class="muted">Bans are applied by the site admins.</p>
+      </div>
+    {% endif %}
+
+    {# Deleting is not done from this button - it only opens the confirmation
+       page, because following a link should never destroy an account. #}
+    <div class="danger-zone">
+      <h3>Delete account</h3>
+      <p>Deleting removes your profile, picture, banner and bio, signs you out
+        everywhere, and releases your username for somebody else to register.
+        Your posts and comments are <strong>not</strong> deleted - they stay on the
+        site, shown as <strong>{{ DELETED_ACCOUNT_NAME }}</strong>.</p>
+      <a class="danger-button" href="{{ url_for('delete_account') }}">Delete my account</a>
+    </div>
   {% else %}
     <p class="muted">You are browsing as a visitor. Appearance settings above work anyway;
       posting, commenting and following need an account.</p>
@@ -94,6 +120,10 @@
         ('Image bytes', stats.upload_bytes|filesize),
         ('Link cards', stats.link_cards),
         ('Cards with images', stats.link_images),
+        ('Deleted accounts', stats.deleted_users),
+        ('Account bans', stats.banned_accounts),
+        ('Comment bans', stats.comment_bans),
+        ('Post bans', stats.post_bans),
     ] %}
       <div class="owner-stat">
         <span class="owner-stat-value">{{ value }}</span>
@@ -113,6 +143,7 @@
   <div class="settings-links">
     <a class="button" href="{{ url_for('new_post') }}">Write a Systematics post</a>
     <a class="button" href="{{ url_for('admin') }}">Admin panel</a>
+    <a class="button" href="{{ url_for('admin') }}#users">Ban or unban an account</a>
   </div>
   <form class="owner-action" method="post" action="{{ url_for('settings_refresh_links') }}">
     <button type="submit">Rebuild link cards</button>

@@ -72,6 +72,19 @@
     </div>
   </aside>
   <main class="feed">
+    {# A banned visitor is told what they can and cannot do on every page, rather
+       than only discovering it when a button refuses them. #}
+    {% if my_bans %}
+      <div class="ban-notice">
+        <strong>Moderation notice</strong>
+        <ul>
+          {% for kind, info in my_bans.items() %}
+            <li>{{ ban_message(kind, info) }}</li>
+          {% endfor %}
+        </ul>
+        <a href="{{ url_for('settings') }}">Account settings</a>
+      </div>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for category, message in messages %}
         <div class="flash {{ category }}">{{ message }}</div>

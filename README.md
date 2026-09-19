@@ -130,6 +130,59 @@ only action behind it, `POST /settings/refresh-links`, is gated by `@owner_requi
 markup is not access control. To add a second owner, add the username to `OWNER_USERNAMES` in
 `wrangler.jsonc` (or the dashboard) and redeploy; no code change is involved.
 
+## Deleting your account
+
+The Account card on `/settings` ends with **Delete my account**, which only *links* to
+`/settings/delete-account` - following a link never destroys anything. The confirmation page asks
+for two separate deliberate acts before it does anything: typing your username exactly, and
+ticking "I understand that my account cannot be recovered". Owner accounts get an extra warning
+there, because owner rights come from `OWNER_USERNAMES` rather than from the account, so deleting
+the account frees the name for anyone to register - and whoever registers it becomes an owner.
+
+Deleting is a **soft delete**, and it is the reason the `users` row survives: a hard `DELETE`
+would cascade through `posts` and `comments` and take everything the person ever wrote with it,
+leaving one-sided threads behind. What goes instead is everything that identifies them:
+
+| Kept | Removed |
+| --- | --- |
+| the row, their posts, their comments, their votes | display name (becomes `[ Account Deleted ]`), username (released, freed for reuse), password hash, bio, avatar, banner, every `follows` row in either direction |
+
+Their profile then 404s like an unknown account, their comments and posts render as
+`[ Account Deleted ]` with a ✕ avatar and no profile link, and the account can never sign in
+again. The admin panel lists them as `deleted` with nothing left to restrict.
+
+## Bans
+
+Moderation lives in the admin panel (`/admin`, section *Accounts*), where every account row has a
+**Ban** box, a **For** box and an optional reason. The six bans are:
+
+| Ban | What it stops |
+| --- | --- |
+| Temporary comment ban | commenting (for the chosen span) |
+| Comment ban | commenting, permanently |
+| Temporary post ban | writing or editing posts |
+| Post ban | writing or editing posts, permanently |
+| Temporary account ban | signing in at all |
+| Permanent account ban | signing in at all, with no expiry |
+
+The *For* box (1 hour / 1 day / 3 days / 1 week / 30 days) applies to the two temporary bans and
+is ignored by the permanent ones. Enforcement is server-side and in three places: an account ban
+is checked in `before_request` and again at sign-in (clearing the session, so a banned browser
+stops being accepted at all), a comment ban is checked before a comment is inserted, and a post
+ban before a post is created or edited. A banned person still *reads* what they were banned from
+writing, and the site shows them a moderation notice on every page explaining what is restricted
+and until when.
+
+Temporary bans are stored as an expiry and evaluated on read, so they lift themselves the moment
+they run out - nothing sweeps them, and the admin panel simply stops listing them. Owner accounts
+and your own account cannot be banned: owner rights would survive a ban, so it would only lock the
+owner out of their own panel. Lifting is a per-account **Lift bans** button (or `kind=account`,
+`comment` or `post` to clear just one).
+
+Both features are migration `0009_account_deletion_and_bans.sql`, which adds columns to `users` -
+so run `npm run db:remote` **before** the deploy that carries this code, since the GitHub Action
+ships code and never migrations.
+
 ## Posting, feeds, votes and replies
 
 **Anyone with an account can post.** Signed-in users see "Write" in the nav and a

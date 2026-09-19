@@ -4,11 +4,13 @@
        {% from "_widgets.html" import avatar, vote_bar with context %}
 #}
 
+{# The initial comes from name_initial(), which answers ✕ for a deleted account
+   instead of the "[" its tombstone name would otherwise start with. #}
 {% macro avatar(picture, name, extra='') -%}
   {%- if picture -%}
     <img class="avatar avatar-img {{ extra }}" src="{{ url_for('uploads', filename=picture) }}" alt="">
   {%- else -%}
-    <div class="avatar {{ extra }}">{{ (name or '?')[:1]|upper }}</div>
+    <div class="avatar {{ extra }}">{{ name|name_initial }}</div>
   {%- endif -%}
 {%- endmacro %}
 
@@ -16,7 +18,7 @@
   {%- if picture -%}
     <img class="small-avatar avatar-img" src="{{ url_for('uploads', filename=picture) }}" alt="">
   {%- else -%}
-    <div class="small-avatar">{{ (name or '?')[:1]|upper }}</div>
+    <div class="small-avatar">{{ name|name_initial }}</div>
   {%- endif -%}
 {%- endmacro %}
 
@@ -66,7 +68,7 @@
   {{ avatar(person.profile_picture, person.display_name) }}
   <div class="person-main">
     <a href="{{ url_for('profile', username=person.username) }}"><strong>{{ person.display_name }}</strong></a>
-    <span class="person-meta">@{{ person.username }} · {{ person.follower_count }} follower{% if person.follower_count != 1 %}s{% endif %} · {{ person.post_count }} post{% if person.post_count != 1 %}s{% endif %}</span>
+    <span class="person-meta">{% if not person.deleted_at %}@{{ person.username }} · {% endif %}{{ person.follower_count }} follower{% if person.follower_count != 1 %}s{% endif %} · {{ person.post_count }} post{% if person.post_count != 1 %}s{% endif %}</span>
     {% if person.bio %}<p class="person-bio">{{ person.bio|linkify(160) }}{% if person.bio|length > 160 %}…{% endif %}</p>{% endif %}
   </div>
   {{ follow_button(person, following, next_url) }}
@@ -81,7 +83,8 @@
     {% if post.author_username %}
       {{ avatar(post.author_picture, post.author_display_name) }}
       <div class="post-author">
-        <strong><a href="{{ url_for('profile', username=post.author_username) }}">{{ post.author_display_name }}</a></strong>
+        {# A deleted account keeps its posts but has no profile left to open. #}
+        <strong>{% if post.author_deleted %}{{ post.author_display_name }}{% else %}<a href="{{ url_for('profile', username=post.author_username) }}">{{ post.author_display_name }}</a>{% endif %}</strong>
         <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}{% if post.status != 'published' %} · {{ post.status }}{% endif %}</span>
       </div>
     {% else %}

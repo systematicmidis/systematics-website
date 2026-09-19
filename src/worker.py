@@ -458,6 +458,10 @@ def inject_globals():
         "current_user": current_user(),
         "is_admin": is_admin(),
         "is_owner": is_owner(),
+        # Every template can warn the signed-in visitor of their own restrictions
+        # (base.html shows them), which is why this is computed here and not in
+        # one route.
+        "my_bans": active_bans(current_user()) if session.get("user_db_id") else {},
     }
 
 
@@ -498,6 +502,210 @@ def owner_required(f):
             return redirect(url_for("login", next=request.path))
         return f(*args, **kwargs)
     return wrapper
+
+
+# Account deletion and moderation bans ---------------------------------------
+# Two moderation tools, described together because they share the same row.
+#
+# Deleting is a *soft* delete: the row survives so the posts and comments the
+# person wrote keep an author and old threads do not collapse into one-sided
+# conversations (the foreign keys cascade, so a hard DELETE would take them all
+# with it). What goes is everything that identifies the person - the display name
+# becomes DELETED_ACCOUNT_NAME, the handle is released as deleted_user_<id>, and
+# the password hash, bio, avatar and banner are cleared - and their profile stops
+# resolving, so the account can never be signed into again.
+DELETED_ACCOUNT_NAME = "[ Account Deleted ]"
+
+# What an admin can hand out. Each choice covers exactly one thing - signing in at
+# all (account), commenting, or posting - and is either temporary (an expiry
+# picked from BAN_DURATIONS) or permanent.
+BAN_CHOICES = {
+    "comment_temp": ("comment", False, "Temporary comment ban"),
+    "comment_perm": ("comment", True, "Comment ban"),
+    "post_temp": ("post", False, "Temporary post ban"),
+    "post_perm": ("post", True, "Post ban"),
+    "account_temp": ("account", False, "Temporary account ban"),
+    "account_perm": ("account", True, "Permanent account ban"),
+}
+BAN_KINDS = ("account", "comment", "post")
+BAN_DURATIONS = {
+    "1h": ("1 hour", timedelta(hours=1)),
+    "1d": ("1 day", timedelta(days=1)),
+    "3d": ("3 days", timedelta(days=3)),
+    "1w": ("1 week", timedelta(days=7)),
+    "30d": ("30 days", timedelta(days=30)),
+}
+DEFAULT_BAN_DURATION = "1w"
+BAN_REASON_MAX = 200
+DB_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def utcnow():
+    """Naive UTC now, matching the way D1's CURRENT_TIMESTAMP is stored."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def db_time(value):
+    """Parse a stored timestamp, or None when it is missing or malformed."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value), DB_TIME_FORMAT)
+    except (TypeError, ValueError):
+        return None
+
+
+def ban_columns(kind):
+    """The expiry and permanent-flag columns for one ban kind.
+
+    Column names are built from the BAN_KINDS whitelist, never from a request, so
+    the f-strings that use this cannot be pointed at something else.
+    """
+    if kind not in BAN_KINDS:
+        raise ValueError(f"unknown ban kind: {kind}")
+    return f"{kind}_ban_until", f"{kind}_ban_permanent"
+
+
+def ban_state(user):
+    """Every ban on ``user``: {kind: {"active", "permanent", "until"}}.
+
+    Expiry is judged here instead of by a cleanup job, so a temporary ban lifts
+    itself the moment its expiry passes and leaves nothing behind.
+    """
+    state = {}
+    for kind in BAN_KINDS:
+        until_column, permanent_column = ban_columns(kind)
+        permanent = bool(user.get(permanent_column)) if user else False
+        until = user.get(until_column) if user else None
+        expires_at = db_time(until)
+        active = permanent or bool(expires_at and expires_at > utcnow())
+        state[kind] = {
+            "active": active,
+            "permanent": permanent,
+            # An expiry in the past is not worth showing anyone.
+            "until": None if permanent else (until if active else None),
+        }
+    return state
+
+
+def active_bans(user):
+    """Only the bans that still bite, for notices and badges."""
+    if not user:
+        return {}
+    return {kind: info for kind, info in ban_state(user).items() if info["active"]}
+
+
+BAN_MESSAGES = {
+    "account": (
+        "Your account is permanently banned from this site.",
+        "Your account is banned until {until} UTC.",
+    ),
+    "comment": (
+        "You are permanently banned from commenting.",
+        "You are banned from commenting until {until} UTC.",
+    ),
+    "post": (
+        "You are permanently banned from posting.",
+        "You are banned from posting until {until} UTC.",
+    ),
+}
+
+
+def ban_message(kind, info):
+    """The sentence a banned person sees, written from their own point of view."""
+    permanent, temporary = BAN_MESSAGES[kind]
+    if info.get("permanent") or not info.get("until"):
+        return permanent
+    return temporary.format(until=info["until"])
+
+
+def is_banned(user, kind):
+    """True when ``user`` cannot do the thing ``kind`` names right now."""
+    return bool(user) and ban_state(user)[kind]["active"]
+
+
+def posting_blocked():
+    """Flash a post ban and report whether writing a post is refused."""
+    info = active_bans(current_user()).get("post")
+    if info:
+        flash(ban_message("post", info), "error")
+        return True
+    return False
+
+
+def name_initial(value):
+    """One character for an avatar: a letter, or a cross for a deleted account."""
+    text = (value or "").strip()
+    if not text:
+        return "?"
+    if text == DELETED_ACCOUNT_NAME:
+        return "✕"
+    return text[:1].upper()
+
+
+def anonymise_account(user):
+    """Delete ``user``'s account without deleting what they wrote.
+
+    Runs without the session cleared, so the caller decides where to send the
+    visitor afterwards; the cached user is dropped because the row just changed
+    under it.
+    """
+    for column in ("profile_picture", "banner"):
+        delete_upload(user.get(column))
+    execute(
+        """UPDATE users SET username=?, display_name=?, password_hash='', bio=NULL,
+                           profile_picture=NULL, banner=NULL, deleted_at=datetime('now')
+           WHERE id=?""",
+        f"deleted_user_{user['id']}", DELETED_ACCOUNT_NAME, user["id"],
+    )
+    # Follower rows in either direction go, so a deleted account disappears from
+    # every list instead of sitting there behind a handle nobody can open.
+    execute("DELETE FROM follows WHERE follower_id=? OR followed_id=?", user["id"], user["id"])
+    g.pop("current_user", None)
+
+
+def moderation_block(target):
+    """Why ``target`` cannot be banned, or None when it can.
+
+    Owner accounts are protected: owner rights come from OWNER_USERNAMES, so
+    banning one would not remove those rights, it would only lock the owner out
+    of their own admin panel.
+    """
+    if not target:
+        return "That account no longer exists."
+    if target.get("deleted_at"):
+        return "That account has been deleted."
+    if is_owner_username(target.get("username")):
+        return "Owner accounts cannot be banned."
+    me = current_user()
+    if me and me["id"] == target["id"]:
+        return "You cannot ban your own account."
+    return None
+
+
+@app.before_request
+def enforce_moderation():
+    """Sign out deleted or account-banned sessions before any route can use them.
+
+    Static assets are skipped so a restricted visitor still gets a styled page.
+    """
+    if request.path.startswith(("/static/", "/uploads/")):
+        return None
+    user = current_user()
+    if not user:
+        return None
+    if user.get("deleted_at"):
+        session.clear()
+        flash("That account has been deleted.", "error")
+        return redirect(url_for("home"))
+    info = active_bans(user).get("account")
+    if info:
+        # Clearing the session is the ban: the signed-in cookie stops being
+        # accepted, and the flash is written after it so the person is told why.
+        session.clear()
+        flash(ban_message("account", info), "error")
+        return redirect(url_for("login"))
+    return None
 
 
 def valid_username(value):
@@ -547,7 +755,8 @@ def fetch_posts(where="", params=(), limit=None):
                link_previews.title AS link_title,
                link_previews.description AS link_description,
                link_previews.image AS link_image,
-               link_previews.site AS link_site
+               link_previews.site AS link_site,
+               users.deleted_at AS author_deleted
         FROM posts
         LEFT JOIN users ON users.id = posts.user_id
         LEFT JOIN link_previews ON link_previews.url = posts.link_url
@@ -641,7 +850,8 @@ def comment_threads(post_id):
     rows = query("""
         SELECT comments.*, users.id AS author_id,
                users.user_id AS public_user_id,
-               users.username, users.display_name, users.profile_picture
+               users.username, users.display_name, users.profile_picture,
+               users.deleted_at AS author_deleted
         FROM comments
         JOIN users ON users.id = comments.user_id
         WHERE comments.post_id=?
@@ -738,6 +948,17 @@ def human_filesize(value):
 
 
 app.jinja_env.filters["filesize"] = human_filesize
+app.jinja_env.filters["name_initial"] = name_initial
+# The admin panel and the owner panel both render ban badges, and the ban rules
+# live in one place, so the templates ask these instead of re-deriving anything.
+app.jinja_env.globals["ban_state"] = ban_state
+app.jinja_env.globals["active_bans"] = active_bans
+app.jinja_env.globals["ban_message"] = ban_message
+app.jinja_env.globals["is_owner_username"] = is_owner_username
+app.jinja_env.globals["BAN_CHOICES"] = BAN_CHOICES
+app.jinja_env.globals["BAN_DURATIONS"] = BAN_DURATIONS
+app.jinja_env.globals["DEFAULT_BAN_DURATION"] = DEFAULT_BAN_DURATION
+app.jinja_env.globals["DELETED_ACCOUNT_NAME"] = DELETED_ACCOUNT_NAME
 
 
 def http_fetch():
@@ -1116,6 +1337,11 @@ def post(post_id):
         if not session.get("user_db_id"):
             flash("Log in or create an account to comment.", "error")
             return redirect(url_for("login", next=url_for("post", post_id=post_id) + "#comments"))
+        comment_ban = active_bans(current_user()).get("comment")
+        if comment_ban:
+            # Reading the thread is still allowed; only writing to it is not.
+            flash(ban_message("comment", comment_ban), "error")
+            return redirect(url_for("post", post_id=post_id) + "#comments")
         content = request.form.get("content", "").strip()
         parent_id = request.form.get("parent_id", "").strip()
         # Replies are one level deep: a reply to a reply attaches to the same parent,
@@ -1184,6 +1410,8 @@ def new_post():
     """Any signed-in account can post; the category follows from the account."""
     user = current_user()
     if request.method == "POST":
+        if posting_blocked():
+            return redirect(url_for("home"))
         target = save_post()
         if target:
             if request.form.get("status") == "draft":
@@ -1211,6 +1439,8 @@ def edit_post(post_id):
         flash("You can only edit your own posts.", "error")
         return redirect(url_for("post", post_id=post_id))
     if request.method == "POST":
+        if posting_blocked():
+            return redirect(url_for("post", post_id=post_id))
         target = save_post(item)
         if target:
             flash("Post updated.", "success")
@@ -1339,16 +1569,25 @@ def login():
         password = request.form.get("password", "")
         user = first("SELECT * FROM users WHERE username=? COLLATE NOCASE", username)
         if user and verify_password(user["password_hash"], password):
-            session.clear()
-            session["user_db_id"] = user["id"]
-            # "Remember me" is the only thing that gives the cookie an expiry
-            # date; without it the browser drops it when it closes. session.clear()
-            # above also discarded any previous choice, so this is set fresh each
-            # sign-in rather than inherited from the last one.
-            if request.form.get("remember"):
-                session.permanent = True
-            return redirect(safe_next(request.form.get("next"), url_for("home")))
-        flash("Invalid username or password.", "error")
+            # Refused here as well as in enforce_moderation(), because this is the
+            # one request that hands out a session in the first place.
+            ban = active_bans(user).get("account")
+            if user.get("deleted_at"):
+                flash("That account has been deleted.", "error")
+            elif ban:
+                flash(ban_message("account", ban), "error")
+            else:
+                session.clear()
+                session["user_db_id"] = user["id"]
+                # "Remember me" is the only thing that gives the cookie an expiry
+                # date; without it the browser drops it when it closes. session.clear()
+                # above also discarded any previous choice, so this is set fresh each
+                # sign-in rather than inherited from the last one.
+                if request.form.get("remember"):
+                    session.permanent = True
+                return redirect(safe_next(request.form.get("next"), url_for("home")))
+        else:
+            flash("Invalid username or password.", "error")
     return render_template(
         "login.html",
         next_url=next_url,
@@ -1364,9 +1603,13 @@ def logout():
 
 
 def profile_user(username):
-    """The profile row for ``username``, or a 404 for an unknown account."""
+    """The profile row for ``username``, or a 404 for an unknown account.
+
+    Deleted accounts 404 like unknown ones: their handle was released, so there
+    is no profile left to show and no way to reach one.
+    """
     user = first("SELECT * FROM users WHERE username=? COLLATE NOCASE", username)
-    if not user:
+    if not user or user.get("deleted_at"):
         abort(404)
     return user
 
@@ -1513,8 +1756,22 @@ def profile_settings():
 
 
 def site_stats():
-    """Every count the owner panel shows, in a single round trip to D1."""
-    return first("""
+    """Every count the owner panel shows, in a single round trip to D1.
+
+    Failure is not fatal by design: the two moderation counts read columns that
+    migration 0009 adds, and the deploy that ships this code does not run
+    migrations (CI ships code only), so a database that has not caught up yet
+    leaves the panel's tiles blank rather than turning the whole page into a 500.
+    """
+    try:
+        row = first(SITE_STATS_SQL)
+    except Exception as exc:  # pragma: no cover - depends on the database state
+        app.logger.warning("Site stats unavailable, running migration 0009? %s", exc)
+        return {}
+    return row or {}
+
+
+SITE_STATS_SQL = """
         SELECT (SELECT COUNT(*) FROM users) AS users,
                (SELECT COUNT(*) FROM posts) AS posts,
                (SELECT COUNT(*) FROM posts WHERE status='published') AS published,
@@ -1526,8 +1783,21 @@ def site_stats():
                (SELECT COUNT(*) FROM uploads) AS uploads,
                (SELECT COALESCE(SUM(size), 0) FROM uploads) AS upload_bytes,
                (SELECT COUNT(*) FROM link_previews) AS link_cards,
-               (SELECT COUNT(*) FROM link_previews WHERE image IS NOT NULL) AS link_images
-    """) or {}
+               (SELECT COUNT(*) FROM link_previews WHERE image IS NOT NULL) AS link_images,
+               (SELECT COUNT(*) FROM users WHERE deleted_at IS NOT NULL) AS deleted_users,
+               (SELECT COUNT(*) FROM users
+                 WHERE account_ban_permanent=1
+                    OR (account_ban_until IS NOT NULL AND account_ban_until > datetime('now')))
+                   AS banned_accounts,
+               (SELECT COUNT(*) FROM users
+                 WHERE comment_ban_permanent=1
+                    OR (comment_ban_until IS NOT NULL AND comment_ban_until > datetime('now')))
+                   AS comment_bans,
+               (SELECT COUNT(*) FROM users
+                 WHERE post_ban_permanent=1
+                    OR (post_ban_until IS NOT NULL AND post_ban_until > datetime('now')))
+                   AS post_bans
+"""
 
 
 def owner_drafts(limit=10):
@@ -1599,6 +1869,40 @@ def settings_refresh_links():
     checked, cards = refresh_link_cards()
     flash_refresh_result(checked, cards)
     return redirect(url_for("settings") + "#owner")
+
+
+@app.route("/settings/delete-account", methods=["GET", "POST"])
+@login_required
+def delete_account():
+    """The second half of deleting an account: an explicit confirmation page.
+
+    The button in settings only links here - nothing is destroyed by following a
+    link. This page asks for two separate deliberate acts before it does
+    anything: typing the username and ticking the acknowledgement. There is no
+    undo, and the handle becomes free for anyone else to register.
+    """
+    user = current_user()
+    if user.get("deleted_at"):
+        session.clear()
+        return redirect(url_for("home"))
+    if request.method == "POST":
+        typed = request.form.get("confirm_username", "").strip()
+        if not request.form.get("understand"):
+            flash("Tick the box to confirm you understand this cannot be undone.", "error")
+        elif typed.lower() != (user["username"] or "").lower():
+            flash("Type your username exactly to confirm it is you.", "error")
+        else:
+            anonymise_account(user)
+            session.clear()
+            flash("Your account has been deleted. Your posts and comments are still "
+                  f"here, shown as {DELETED_ACCOUNT_NAME}.", "success")
+            return redirect(url_for("home"))
+    return render_template(
+        "delete_account.html",
+        user=user,
+        deleted_name=DELETED_ACCOUNT_NAME,
+        owner_account=is_owner_username(user["username"]),
+    )
 
 
 @app.route("/admin/login", methods=["GET", "POST"])
@@ -1683,6 +1987,72 @@ def admin_refresh_links():
     checked, cards = refresh_link_cards()
     flash_refresh_result(checked, cards)
     return redirect(url_for("admin") + "#posts")
+
+
+@app.post("/admin/users/<int:user_id>/ban")
+@admin_required
+def admin_ban_user(user_id):
+    """Hand out one of the six bans: a kind, a duration, and optionally why."""
+    target = first("SELECT * FROM users WHERE id=?", user_id)
+    block = moderation_block(target)
+    if block:
+        flash(block, "error")
+        return redirect(url_for("admin") + "#users")
+    choice = BAN_CHOICES.get(request.form.get("ban", ""))
+    if not choice:
+        flash("Pick a ban to apply first.", "error")
+        return redirect(url_for("admin") + "#users")
+    kind, permanent, label = choice
+    until = None
+    if not permanent:
+        duration = request.form.get("duration", DEFAULT_BAN_DURATION)
+        if duration not in BAN_DURATIONS:
+            duration = DEFAULT_BAN_DURATION
+        until = (utcnow() + BAN_DURATIONS[duration][1]).strftime(DB_TIME_FORMAT)
+    reason = request.form.get("reason", "").strip()[:BAN_REASON_MAX]
+    until_column, permanent_column = ban_columns(kind)
+    me = current_user()
+    try:
+        execute(
+            f"""UPDATE users SET {until_column}=?, {permanent_column}=?, ban_reason=?,
+                                banned_at=datetime('now'), banned_by=?
+               WHERE id=?""",
+            until, 1 if permanent else 0, reason or None,
+            (me or {}).get("username") or "admin", target["id"],
+        )
+    except Exception as exc:  # most likely: migration 0009 has not been applied
+        app.logger.warning("Could not ban user %s: %s", target["id"], exc)
+        flash("The ban could not be saved. Has `npm run db:remote` been run for this "
+              "database?", "error")
+        return redirect(url_for("admin") + "#users")
+    where = f" until {until} UTC" if until else " permanently"
+    flash(f"{label} applied to {target['display_name']}{where}.", "success")
+    return redirect(url_for("admin") + "#users")
+
+
+@app.post("/admin/users/<int:user_id>/unban")
+@admin_required
+def admin_unban_user(user_id):
+    """Lift one kind of ban, or every kind at once."""
+    target = first("SELECT * FROM users WHERE id=?", user_id)
+    if not target:
+        abort(404)
+    requested = request.form.get("kind", "all")
+    kinds = (requested,) if requested in BAN_KINDS else BAN_KINDS
+    assignments = []
+    for kind in kinds:
+        until_column, permanent_column = ban_columns(kind)
+        assignments.append(f"{until_column}=NULL")
+        assignments.append(f"{permanent_column}=0")
+    try:
+        execute(f"UPDATE users SET {', '.join(assignments)} WHERE id=?", target["id"])
+    except Exception as exc:
+        app.logger.warning("Could not lift bans for %s: %s", target["id"], exc)
+        flash("The bans could not be lifted. Has `npm run db:remote` been run for "
+              "this database?", "error")
+        return redirect(url_for("admin") + "#users")
+    flash(f"Lifted the ban on {target['display_name']}.", "success")
+    return redirect(url_for("admin") + "#users")
 
 
 @app.errorhandler(404)

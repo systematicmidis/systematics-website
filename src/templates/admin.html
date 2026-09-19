@@ -40,6 +40,85 @@
   {% endfor %}
 </section>
 
+{# Accounts and bans ----------------------------------------------------------
+   Six bans, each one exactly one thing: commenting, posting, or the whole
+   account - temporary (the "For" box) or permanent. The rule that an expired ban
+   stops counting lives in ban_state() in src/worker.py; this page only shows the
+   result, which is why a ban that has run out simply is not listed here. #}
+<section id="users">
+  <div class="section-heading"><h2>Accounts</h2><span>{{ users|length }}</span></div>
+  <p class="muted">
+    Ban somebody from commenting, from posting, or from the site entirely - for a
+    while or for good. The "For" box only applies to the temporary bans; the two
+    permanent ones ignore it. Owner accounts and your own account cannot be banned,
+    and a deleted account has nothing left to restrict.
+  </p>
+  {% for person in users %}
+    {% set bans = active_bans(person) %}
+    <div class="admin-row account-row">
+      <div class="account-main">
+        <strong>
+          {% if person.deleted_at %}{{ person.display_name }}
+          {% else %}<a href="{{ url_for('profile', username=person.username) }}">{{ person.display_name }}</a>
+          {% endif %}
+        </strong>
+        {% if person.deleted_at %}<span class="badge badge-deleted">deleted</span>{% endif %}
+        {% if is_owner_username(person.username) %}<span class="owner-tag">owner</span>{% endif %}
+        <small>
+          {% if person.deleted_at %}handle released{% else %}@{{ person.username }}{% endif %}
+          · joined {{ person.created_at }}
+          {%- if person.user_id %} · id {{ person.user_id }}{% endif %}
+        </small>
+        {% if bans %}
+          <div class="ban-badges">
+            {% for kind, info in bans.items() %}
+              <span class="badge badge-ban">
+                {{ kind|capitalize }} ban{% if info.permanent %} (permanent){% else %} until {{ info.until }} UTC{% endif %}
+              </span>
+            {% endfor %}
+          </div>
+          {% if person.ban_reason %}
+            <small class="ban-reason-note">Reason: {{ person.ban_reason }}{% if person.banned_by %} · by {{ person.banned_by }}{% endif %}{% if person.banned_at %} · {{ person.banned_at }} UTC{% endif %}</small>
+          {% endif %}
+        {% endif %}
+      </div>
+      {% if person.deleted_at %}
+        {# Nothing left to restrict, and no handle to show. #}
+      {% elif is_owner_username(person.username) %}
+        <div class="ban-controls"><small class="muted">Owner accounts cannot be banned.</small></div>
+      {% elif current_user and current_user.id == person.id %}
+        <div class="ban-controls"><small class="muted">This is your own account.</small></div>
+      {% else %}
+        <div class="ban-controls">
+          <form method="post" action="{{ url_for('admin_ban_user', user_id=person.id) }}">
+            <label class="ban-field">Ban
+              <select name="ban">
+                {% for key, choice in BAN_CHOICES.items() %}
+                  <option value="{{ key }}">{{ choice[2] }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="ban-field">For
+              <select name="duration">
+                {% for key, span in BAN_DURATIONS.items() %}
+                  <option value="{{ key }}"{% if key == DEFAULT_BAN_DURATION %} selected{% endif %}>{{ span[0] }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <input class="ban-reason" name="reason" maxlength="200" placeholder="Reason (optional)">
+            <button type="submit">Apply ban</button>
+          </form>
+          {% if bans %}
+            <form method="post" action="{{ url_for('admin_unban_user', user_id=person.id) }}">
+              <button class="clear-ban" type="submit">Lift bans</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+</section>
+
 <section id="comments" class="admin-comments">
   <div class="section-heading"><h2>Recent comments</h2><span>{{ comments|length }}</span></div>
   {% for comment in comments %}

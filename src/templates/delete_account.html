@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Delete account · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="auth-card danger-card">
+  <p class="eyebrow">PERMANENT</p>
+  <h1>Delete your account?</h1>
+  <p>You are signed in as <strong>{{ user.display_name }}</strong>
+    <span class="muted">@{{ user.username }}</span>.</p>
+
+  <ul class="delete-list">
+    <li>Your profile, username, bio, picture and banner are removed.</li>
+    <li>You are signed out, and this account can never sign in again.</li>
+    <li>Your posts and comments are <strong>kept</strong>, shown as
+      <strong>{{ deleted_name }}</strong>.</li>
+    <li>Your follows go, in both directions.</li>
+  </ul>
+
+  {% if owner_account %}
+  <div class="owner-warning">
+    <strong>This account is an owner of this site.</strong>
+    <p>Owner rights come from the <code>OWNER_USERNAMES</code> list, not from the
+      account, so deleting it frees the name <code>{{ user.username }}</code> for
+      anyone to register - and whoever registers it becomes an owner. Remove the name
+      from <code>OWNER_USERNAMES</code> first if that is not what you want.</p>
+  </div>
+  {% endif %}
+
+  {# Two separate deliberate acts: typing the name, and the acknowledgement. #}
+  <form method="post">
+    <label>Type your username to confirm
+      <input name="confirm_username" autocomplete="off" autocapitalize="none"
+             spellcheck="false" placeholder="{{ user.username }}" required>
+      <small>Type it exactly as it is written above.</small>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="understand" value="1" required>
+      I understand that my account cannot be recovered
+    </label>
+    <div class="settings-links">
+      <button class="danger-button" type="submit">Permanently delete my account</button>
+      <a class="button" href="{{ url_for('settings') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}
