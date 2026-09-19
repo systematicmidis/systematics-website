@@ -26,52 +26,73 @@
   <script src="/static/theme.js" defer></script>
 </head>
 <body>
-<header class="topbar">
-  <div class="topbar-inner">
-    <a class="brand" href="{{ url_for('home') }}">Black MIDI</a>
-    <nav>
-      <a href="{{ url_for('home') }}">Home</a>
+{# Google+ kept every link in a rail against the left edge of the window and put
+   the stream in one narrow column centred in the space that was left, with
+   nothing along the top. This is that shape: one rail, one column, no top bar.
+   The rail carries what the old top bar and sidebar held between them.
+
+   ``is-active`` is worked out per link rather than hard-coded, so the rail says
+   where you actually are - a query string counts, which is what the two category
+   feeds and the following stream use. #}
+{% set on_home = request.path == url_for('home') and not request.args.get('category') and not request.args.get('feed') %}
+<div class="app">
+  <aside class="rail">
+    <a class="rail-brand" href="{{ url_for('home') }}">Black MIDI</a>
+    {# Two groups of links, stacked down the rail on a desktop and scrolling
+       sideways as one strip on a phone - see the 850px breakpoint. #}
+    <div class="rail-links">
+    <nav class="rail-nav">
+      <a class="rail-link{% if on_home %} is-active{% endif %}" href="{{ url_for('home') }}"><span class="rail-icon" aria-hidden="true">⌂</span>Home</a>
+      <a class="rail-link{% if request.args.get('category') == 'community' %} is-active{% endif %}" href="{{ url_for('home', category='community') }}"><span class="rail-icon" aria-hidden="true">▤</span>Community posts</a>
+      <a class="rail-link{% if request.args.get('category') == 'systematics' %} is-active{% endif %}" href="{{ url_for('home', category='systematics') }}"><span class="rail-icon" aria-hidden="true">★</span>Systematics posts</a>
       {% if current_user %}
-        <a href="{{ url_for('new_post') }}">Write</a>
-        <a href="{{ url_for('profile', username=current_user.username) }}">{{ current_user.display_name }}{% if is_owner %} <span class="owner-tag">owner</span>{% endif %}</a>
-        <a href="{{ url_for('profile_settings') }}">Profile</a>
-      {% else %}
-        <a href="{{ url_for('login') }}">Sign in</a>
-        <a href="{{ url_for('register') }}">Join</a>
+        <a class="rail-link{% if request.args.get('feed') == 'following' %} is-active{% endif %}" href="{{ url_for('home', feed='following') }}"><span class="rail-icon" aria-hidden="true">☰</span>Following stream</a>
+        <a class="rail-link{% if request.path == url_for('new_post') %} is-active{% endif %}" href="{{ url_for('new_post') }}"><span class="rail-icon" aria-hidden="true">✎</span>Write a post</a>
       {% endif %}
-      {% if is_admin %}<a href="{{ url_for('admin') }}">Manage</a>{% else %}<a href="{{ url_for('admin_login') }}">Admin</a>{% endif %}
-      <a class="nav-settings" href="{{ url_for('settings') }}">⚙ Settings</a>
-      {# A one-click flip for people who just want to dim the page; the same
-         choice lives on the settings page, and both go through theme.js. #}
-      <button class="theme-quick" type="button" data-theme-toggle
-              title="Switch between light and dark" aria-label="Switch between light and dark">
-        <span class="theme-quick-light" aria-hidden="true">☀</span>
-        <span class="theme-quick-dark" aria-hidden="true">☾</span>
-      </button>
-      {% if current_user %}<a href="{{ url_for('logout') }}">Sign out</a>{% endif %}
     </nav>
-  </div>
-</header>
-<div class="page-shell">
-  <aside class="sidebar">
-    <a class="side-link active" href="{{ url_for('home') }}">⌂ &nbsp; Home</a>
-    <a class="side-link" href="{{ url_for('home', category='community') }}">▤ &nbsp; Community posts</a>
-    <a class="side-link" href="{{ url_for('home', category='systematics') }}">★ &nbsp; Systematics posts</a>
-    {% if current_user %}
-      <a class="side-link" href="{{ url_for('home', feed='following') }}">☰ &nbsp; Following stream</a>
-      <a class="side-link" href="{{ url_for('profile', username=current_user.username) }}">● &nbsp; My profile</a>
-      <a class="side-link" href="{{ url_for('followers', username=current_user.username) }}">◍ &nbsp; My followers</a>
-    {% endif %}
-    <a class="side-link" href="{{ url_for('settings') }}">⚙ &nbsp; Settings</a>
-    {% if is_owner %}
-      <a class="side-link side-link-owner" href="{{ url_for('settings') }}#owner">◆ &nbsp; Owner tools</a>
-    {% endif %}
-    <div class="sidebar-note">
-      <strong>Systematics Black Midi site</strong>
-      <p>Projects, huge MIDI experiments, upcoming videos and progress updates.</p>
+
+    <div class="rail-group">
+      {% if current_user %}
+        <a class="rail-link{% if request.path == url_for('profile', username=current_user.username) %} is-active{% endif %}" href="{{ url_for('profile', username=current_user.username) }}"><span class="rail-icon" aria-hidden="true">●</span>{{ current_user.display_name }}{% if is_owner %} <span class="owner-tag">owner</span>{% endif %}</a>
+        <a class="rail-link{% if request.path == url_for('followers', username=current_user.username) %} is-active{% endif %}" href="{{ url_for('followers', username=current_user.username) }}"><span class="rail-icon" aria-hidden="true">◍</span>My followers</a>
+        <a class="rail-link{% if request.path == url_for('profile_settings') %} is-active{% endif %}" href="{{ url_for('profile_settings') }}"><span class="rail-icon" aria-hidden="true">✱</span>Edit profile</a>
+      {% else %}
+        <a class="rail-link{% if request.path == url_for('login') %} is-active{% endif %}" href="{{ url_for('login') }}"><span class="rail-icon" aria-hidden="true">→</span>Sign in</a>
+        <a class="rail-link{% if request.path == url_for('register') %} is-active{% endif %}" href="{{ url_for('register') }}"><span class="rail-icon" aria-hidden="true">＋</span>Join</a>
+      {% endif %}
+      <a class="rail-link{% if request.path == url_for('settings') %} is-active{% endif %}" href="{{ url_for('settings') }}"><span class="rail-icon" aria-hidden="true">⚙</span>Settings</a>
+      {% if is_owner %}
+        <a class="rail-link rail-link-owner" href="{{ url_for('settings') }}#owner"><span class="rail-icon" aria-hidden="true">◆</span>Owner tools</a>
+      {% endif %}
+      {% if is_admin %}
+        <a class="rail-link{% if request.path == url_for('admin') %} is-active{% endif %}" href="{{ url_for('admin') }}"><span class="rail-icon" aria-hidden="true">⚑</span>Manage site</a>
+      {% else %}
+        <a class="rail-link{% if request.path == url_for('admin_login') %} is-active{% endif %}" href="{{ url_for('admin_login') }}"><span class="rail-icon" aria-hidden="true">⚑</span>Admin</a>
+      {% endif %}
+    </div>
+    </div>
+
+    <div class="rail-foot">
+      {# One-click theme flip for people who just want to dim the page; the same
+         choice lives on the settings page, and both go through theme.js. The
+         icon is the theme it switches *to*. #}
+      <button class="rail-link rail-theme" type="button" data-theme-toggle
+              title="Switch between light and dark" aria-label="Switch between light and dark">
+        <span class="theme-icon-light rail-icon" aria-hidden="true">☀</span>
+        <span class="theme-icon-dark rail-icon" aria-hidden="true">☾</span>Theme
+      </button>
+      {% if current_user %}
+        <a class="rail-link" href="{{ url_for('logout') }}"><span class="rail-icon" aria-hidden="true">⏻</span>Sign out</a>
+      {% endif %}
+      <div class="rail-note">
+        <strong>Systematics Black Midi site</strong>
+        <p>Projects, huge MIDI experiments, upcoming videos and progress updates.</p>
+      </div>
     </div>
   </aside>
-  <main class="feed">
+
+  <div class="stream-col">
+    <main class="feed">
     {# A banned visitor is told what they can and cannot do on every page, rather
        than only discovering it when a button refuses them. #}
     {% if my_bans %}
@@ -91,9 +112,9 @@
       {% endfor %}
     {% endwith %}
     {% block content %}{% endblock %}
-  </main>
-  <aside class="right-space"></aside>
+    </main>
+    <footer>Systematics Black Midi site · A personal project feed</footer>
+  </div>
 </div>
-<footer>Systematics Black Midi site · A personal project feed</footer>
 </body>
 </html>

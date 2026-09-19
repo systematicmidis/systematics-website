@@ -259,8 +259,31 @@ are worth keeping in mind when editing `public/static/style.css`:
 - **User text needs `overflow-wrap:anywhere`** (set on post bodies, comments, bios and link
   cards), because a URL or a filename has no break opportunity for the browser to use.
 
-The home page tabs wrap onto a second row under 560px, the feed/sidebar collapse into one
-column under 850px, and the sticky header is compacted on small screens.
+The home page tabs wrap onto a second row under 560px, and under 850px the rail leaves the side
+of the window for the top: the brand and the theme/sign-out buttons on one row, then every link
+as one strip that scrolls sideways. That strip is usually wider than the phone - it has its own
+scrollbar - so the page itself still measures exactly the width of the viewport.
+
+## Shape of the page
+
+The shell copies Google+: every link lives in a rail against the left edge of the window, the
+stream is one narrow column centred in the space that is left over, and there is no top bar.
+`base.html` renders `.app` (a two-column grid), `.rail` and `.stream-col`. `is-active` is worked
+out per link from `request.path` and the query string rather than hard-coded, so the rail says
+where you actually are - which matters for the two category feeds and the following stream, whose
+URLs differ only in their query.
+
+The rail is `position:sticky` and as tall as the window, so it holds still while the stream
+scrolls past it, and `margin-top:auto` keeps its note and the theme/sign-out buttons at the foot
+of the window on a short page. Under 850px it becomes the two-row strip described in **Mobile
+layout**. Because the rail is inside `body { overflow-x:hidden }`, every new rule that scrolls
+sideways has to do it on an element inside the rail rather than on the page.
+
+**Page changes fade and rise.** Each child of `.feed` runs one `stream-in` animation on load
+(opacity 0 to 1, 8px up, 240ms), with the first four items staggered 36ms apart, so a navigation
+reads as the stream swapping in place instead of the window blinking. It is a CSS animation, not
+JavaScript, so nothing has to run for a page to be readable, and
+`@media (prefers-reduced-motion: reduce)` switches it off for anyone who asked for that.
 
 ## Followers and profiles
 

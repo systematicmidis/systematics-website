@@ -34,63 +34,103 @@ img { max-width:100%; }
 a { color:#357ae8; text-decoration:none; }
 a:hover { text-decoration:underline; }
 
-.topbar {
-  height:54px;
-  background:#fff;
-  border-bottom:1px solid #d8d8d8;
-  box-shadow:0 1px 3px rgba(0,0,0,.12);
+/* The rail and the stream ---------------------------------------------------
+   Google+ kept every link in a rail against the left edge of the window, put the
+   stream in one narrow column centred in the space that was left, and had no top
+   bar at all. That is the shape here: `.app` is the rail plus the column that
+   holds the stream and the footer.
+
+   The rail is as tall as the window and sticks, so it holds still while the
+   stream scrolls past it, and only scrolls on its own if it is ever taller than
+   the window. Below 850px it lies along the top of the window instead - see the
+   breakpoint further down. */
+.app {
+  display:grid;
+  grid-template-columns:212px minmax(0, 1fr);
+  min-height:100vh;
+}
+.rail {
+  grid-column:1;
+  align-self:start;
   position:sticky;
   top:0;
-  z-index:20;
-}
-.topbar-inner {
-  width:min(1200px, calc(100% - 24px));
-  height:100%;
-  margin:auto;
+  height:100vh;
+  overflow-y:auto;
   display:flex;
-  align-items:center;
-  justify-content:space-between;
+  flex-direction:column;
+  padding:10px 10px 20px 6px;
 }
-.brand {
+.rail-brand {
+  display:block;
+  padding:6px 12px 12px;
   color:#666;
-  font-size:20px;
+  font-size:19px;
   font-weight:400;
   letter-spacing:-.4px;
 }
-.topbar nav { display:flex; gap:18px; }
-.topbar nav a { color:#666; font-size:13px; }
-
-.page-shell {
-  width:min(1200px, calc(100% - 24px));
-  margin:18px auto 60px;
-  display:grid;
-  grid-template-columns:190px minmax(0, 600px) 1fr;
-  gap:20px;
+/* The two link groups. On a desktop they stack down the rail; on a phone this
+   wrapper is what turns them into one sideways-scrolling strip. */
+.rail-links { display:flex; flex-direction:column; }
+.rail-nav, .rail-group { display:flex; flex-direction:column; }
+.rail-group {
+  margin-top:12px;
+  padding-top:12px;
+  border-top:1px solid #d5d5d5;
 }
-.sidebar { padding-top:4px; }
-.side-link {
-  display:block;
+.rail-link {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  width:100%;
   padding:9px 12px;
-  color:#555;
+  border:0;
   border-radius:3px;
+  background:none;
+  color:#555;
+  font:inherit;
+  font-size:13px;
+  text-align:left;
+  cursor:pointer;
 }
-.side-link:hover { background:#e5e7e9; text-decoration:none; }
-.side-link.active {
-  background:#ddd;
-  color:#333;
-  font-weight:bold;
-}
-.sidebar-note {
-  margin:22px 10px 0;
-  padding-top:15px;
+.rail-link:hover { background:#e5e7e9; text-decoration:none; }
+.rail-link.is-active { background:#ddd; color:#333; font-weight:bold; }
+.rail-icon { flex:0 0 16px; display:inline-block; text-align:center; }
+.rail-theme { margin-top:4px; }
+.rail-foot { margin-top:auto; padding-top:14px; }
+.rail-note {
+  margin:14px 6px 0;
+  padding-top:14px;
   border-top:1px solid #d5d5d5;
   color:#777;
   font-size:12px;
   line-height:1.5;
 }
-.sidebar-note strong { color:#555; }
-.sidebar-note p { margin-top:5px; }
-.right-space { min-width:0; }
+.rail-note strong { color:#555; }
+.rail-note p { margin:5px 0 0; }
+
+/* The column: one narrow stream, centred in the space the rail leaves over, with
+   the footer pushed to the foot of the window on a short page. */
+.stream-col { grid-column:2; min-width:0; display:flex; flex-direction:column; }
+.feed { width:min(640px, 100%); margin:16px auto 0; min-width:0; }
+footer { margin-top:auto; }
+
+/* Page changes --------------------------------------------------------------
+   A page load fades the stream in and lifts it a few pixels, which is the feel
+   Google+ had when its stream swapped in place. Nothing depends on it: somebody
+   who has asked their system for reduced motion gets the page straight away
+   (see the opt-out at the foot of the file). The first few items stagger, so the
+   column arrives as a stream rather than as one block. */
+@keyframes stream-in {
+  from { opacity:0; transform:translateY(8px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+.feed > * { animation:stream-in .24s cubic-bezier(.2,.7,.3,1) both; }
+.feed > *:nth-child(2) { animation-delay:36ms; }
+.feed > *:nth-child(3) { animation-delay:72ms; }
+.feed > *:nth-child(4) { animation-delay:108ms; }
+@media (prefers-reduced-motion: reduce) {
+  .feed > * { animation:none; }
+}
 
 .feed-header {
   background:#fff;
@@ -240,18 +280,64 @@ footer {
   padding:0 0 30px;
 }
 
-/* Anywhere the layout narrows, the column must be allowed to be narrower than
-   its content (minmax(0, 1fr), not 1fr). Plain ``1fr`` means ``minmax(auto,
-   1fr)``, and ``auto`` floors the track at its widest *unbreakable* item - one
-   pasted URL without a break opportunity turned the whole feed into a 6000px
-   wide page on a phone instead of wrapping. */
+/* Below this the rail lies along the top of the window rather than down the
+   side: the brand and the account buttons on one row, then every link as a
+   single strip that scrolls sideways rather than wrapping into several rows and
+   eating the top of the screen. The alternative - letting the links wrap - was
+   what the old top bar did, and it cost two or three rows on a phone.
+
+   The stream column still has to be allowed to be narrower than its content:
+   ``min-width:0`` here and ``minmax(0, 1fr)`` above are what stop one pasted URL
+   with no break opportunity stretching the whole page. */
 @media (max-width: 850px) {
-  .page-shell { grid-template-columns:minmax(0, 1fr); }
-  .sidebar, .right-space { display:none; }
-  .feed { width:min(600px, 100%); margin:auto; min-width:0; }
+  .app { display:block; }
+  .rail {
+    display:grid;
+    grid-template-columns:auto minmax(0, 1fr);
+    grid-template-areas:
+      "brand foot"
+      "links links";
+    align-items:center;
+    column-gap:8px;
+    height:auto;
+    overflow:visible;
+    background:#fff;
+    border-bottom:1px solid #d8d8d8;
+    box-shadow:0 1px 3px rgba(0,0,0,.12);
+    padding:6px 10px 7px;
+    z-index:20;
+  }
+  .rail-brand { grid-area:brand; padding:4px 0; white-space:nowrap; }
+  .rail-foot {
+    grid-area:foot;
+    flex-direction:row;
+    justify-content:flex-end;
+    margin:0;
+    padding:0;
+    border:0;
+  }
+  .rail-links {
+    grid-area:links;
+    flex-direction:row;
+    flex-wrap:nowrap;
+    overflow-x:auto;
+    gap:2px;
+  }
+  .rail-nav, .rail-group {
+    flex-direction:row;
+    flex-wrap:nowrap;
+    margin:0;
+    padding:0;
+    border:0;
+  }
+  .rail-group { margin-left:6px; padding-left:6px; border-left:1px solid #ddd; }
+  .rail-link { width:auto; white-space:nowrap; }
+  .rail-theme { margin-top:0; }
+  .rail-note { display:none; }
+  .stream-col { display:block; }
+  .feed { width:min(600px, 100%); margin:14px auto 0; }
 }
 @media (max-width: 500px) {
-  .page-shell, .topbar-inner { width:calc(100% - 12px); }
   .post-body { padding-left:15px; padding-right:15px; }
   .post-actions { gap:15px; padding-left:15px; padding-right:15px; }
   .comments { padding-left:15px; padding-right:15px; }
@@ -271,9 +357,9 @@ footer {
 /* Phones: a tighter header, room for the vote row, and no double indentation
    on long comment threads. */
 @media (max-width: 560px) {
-  .topbar nav { gap:12px; }
-  .topbar nav a { font-size:12px; }
-  .brand { font-size:18px; }
+  .rail-link { padding:7px 9px; font-size:12px; }
+  .rail-brand { font-size:17px; padding:6px 8px; }
+  .rail-icon { flex-basis:14px; }
   .tab { padding:8px 10px; font-size:12px; }
   .feed-header { padding:14px 15px; }
   .feed-header h1 { font-size:20px; }
@@ -323,12 +409,6 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .profile-comment { background:#fff; border:1px solid #ddd; border-top:0; padding:14px 18px; }
 .profile-comment p { margin:0 0 6px; white-space:pre-wrap; }
 .profile-comment span { color:#999; font-size:12px; }
-@media (max-width: 650px) {
-  .topbar-inner { flex-wrap:wrap; }
-  .topbar { height:auto; min-height:54px; }
-  .topbar nav { padding:7px 0; flex-wrap:wrap; }
-}
-
 .profile-bio {
   margin:10px 0 0;
   max-width:560px;
@@ -666,19 +746,13 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .owner-row-main small { color:var(--text-dim); }
 .owner-row-link { color:var(--link); font-size:12px; }
 
-/* The one-click theme button in the top bar: shows the theme it switches to. */
-.theme-quick {
-  border:1px solid transparent; background:transparent; color:var(--muted);
-  font:inherit; font-size:14px; line-height:1; padding:4px 7px; border-radius:3px;
-  cursor:pointer;
-}
-.theme-quick:hover { background:var(--surface-3); color:var(--text); }
-.theme-quick-light { display:none; }
-.theme-quick-dark { display:inline; }
-html[data-theme="dark"] .theme-quick-light { display:inline; }
-html[data-theme="dark"] .theme-quick-dark { display:none; }
-.nav-settings { white-space:nowrap; }
-.side-link-owner { color:var(--accent); }
+/* The rail's theme button: one icon, showing the theme it switches to. These
+   come after .rail-icon so the display rules here win over its inline-block. */
+.theme-icon-light { display:none; }
+.theme-icon-dark { display:inline-block; }
+html[data-theme="dark"] .theme-icon-light { display:inline-block; }
+html[data-theme="dark"] .theme-icon-dark { display:none; }
+.rail-link-owner { color:var(--accent); }
 
 @media (max-width: 620px) {
   .theme-switch { grid-template-columns:1fr; }
@@ -791,18 +865,23 @@ html[data-theme="dark"] {
 }
 html[data-theme="dark"] a { color:var(--link); }
 
-/* Chrome: top bar and the left rail */
-html[data-theme="dark"] .topbar {
-  background:#191c22; border-bottom-color:#2c313c; box-shadow:0 1px 3px rgba(0,0,0,.6);
+/* Chrome: the rail. On a desktop it has no background of its own, so the page
+   shows through it - the strip background is only for the phone layout, where
+   the rail is a bar along the top. */
+html[data-theme="dark"] .rail-brand { color:#b9c1cf; }
+html[data-theme="dark"] .rail-link { color:#c3cad6; }
+html[data-theme="dark"] .rail-link:hover { background:#232833; color:#fff; }
+html[data-theme="dark"] .rail-link.is-active { background:#2f3644; color:#fff; }
+html[data-theme="dark"] .rail-group { border-top-color:#2c313c; }
+html[data-theme="dark"] .rail-note { border-top-color:#2c313c; color:#97a0b1; }
+html[data-theme="dark"] .rail-note strong { color:#cfd6e2; }
+@media (max-width: 850px) {
+  html[data-theme="dark"] .rail {
+    background:#191c22; border-bottom-color:#2c313c;
+    box-shadow:0 1px 3px rgba(0,0,0,.6);
+  }
+  html[data-theme="dark"] .rail-group { border-left-color:#2c313c; }
 }
-html[data-theme="dark"] .brand,
-html[data-theme="dark"] .topbar nav a { color:#b9c1cf; }
-html[data-theme="dark"] .topbar nav a:hover { color:#fff; }
-html[data-theme="dark"] .side-link { color:#c3cad6; }
-html[data-theme="dark"] .side-link:hover { background:#232833; }
-html[data-theme="dark"] .side-link.active { background:#2f3644; color:#fff; }
-html[data-theme="dark"] .sidebar-note { border-top-color:#2c313c; color:#97a0b1; }
-html[data-theme="dark"] .sidebar-note strong { color:#cfd6e2; }
 
 /* Feed, post cards, comments */
 html[data-theme="dark"] .feed-header { background:#191c22; border-color:#2c313c; }
