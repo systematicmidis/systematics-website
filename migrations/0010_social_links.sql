@@ -1,0 +1,16 @@
+-- Social links on a profile (YouTube, X, TikTok, Discord and so on).
+--
+-- One JSON array in a single column rather than one column per network, because
+-- the list of sites people use keeps changing and an "other" link has no fixed
+-- name to give a column. Each entry is
+--
+--     {"platform": "youtube", "label": "YouTube", "url": "https://youtube.com/@you"}
+--
+-- where "platform" is a key from SOCIAL_PLATFORMS in src/worker.py, or "other"
+-- for a link the user named themselves. The column is re-validated on the way
+-- out as well as on the way in, so a row edited by hand cannot put a
+-- non-http(s) URL on somebody's profile.
+--
+-- NULL (which is what every existing row gets) means "no links", and an empty
+-- profile section is simply not rendered.
+ALTER TABLE users ADD COLUMN social_links TEXT;

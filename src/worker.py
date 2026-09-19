@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import html
 import ipaddress
+import json
 import mimetypes
 import os
 import re
@@ -134,6 +135,36 @@ DEFAULT_OWNER_USERNAMES = "SystematicMIDIS"
 # Profile bios, post statuses and the two feeds.
 MAX_BIO_LENGTH = 500
 MAX_POST_TITLE = 200
+
+# Social links -----------------------------------------------------------------
+# A profile can point at the other places a person is: a channel, a chat server,
+# a personal site. They are stored as one JSON array in users.social_links
+# (migration 0010) rather than a column per network, because the sites people
+# use keep changing and an "other" entry has no fixed name to give a column.
+#
+# Each tuple is (key, label, placeholder). The label is what the editor and the
+# profile chips show; the placeholder is a hint in the box, not a default - an
+# empty box means "no link", which is what keeps a profile honest.
+SOCIAL_PLATFORMS = (
+    ("youtube", "YouTube", "youtube.com/@you"),
+    ("x", "X (Twitter)", "x.com/you"),
+    ("tiktok", "TikTok", "tiktok.com/@you"),
+    ("instagram", "Instagram", "instagram.com/you"),
+    ("discord", "Discord", "discord.gg/invite-code"),
+    ("twitch", "Twitch", "twitch.tv/you"),
+    ("soundcloud", "SoundCloud", "soundcloud.com/you"),
+    ("bandcamp", "Bandcamp", "you.bandcamp.com"),
+    ("github", "GitHub", "github.com/you"),
+    ("website", "Website", "yoursite.com"),
+)
+SOCIAL_LABELS = {key: label for key, label, _placeholder in SOCIAL_PLATFORMS}
+# Rows under "Other platforms", for everything the list above does not cover.
+MAX_OTHER_SOCIAL_LINKS = 3
+# The ceiling for one profile, known platforms plus the other rows. It is also
+# what social_links_of() enforces when it reads the column back.
+MAX_SOCIAL_LINKS = len(SOCIAL_PLATFORMS) + MAX_OTHER_SOCIAL_LINKS
+MAX_SOCIAL_URL = 300
+MAX_SOCIAL_LABEL = 30
 POST_STATUSES = ("published", "draft")
 # Every post lands in exactly one category: owner accounts write to "systematics",
 # everybody else to "community". Both are public; the split just keeps the owner's
@@ -652,9 +683,13 @@ def anonymise_account(user):
     """
     for column in ("profile_picture", "banner"):
         delete_upload(user.get(column))
+    # social_links goes with the bio and the images: a tombstone has no person
+    # left to point at, and leaving their channels on it would outlive the
+    # account they chose to close.
     execute(
         """UPDATE users SET username=?, display_name=?, password_hash='', bio=NULL,
-                           profile_picture=NULL, banner=NULL, deleted_at=datetime('now')
+                           profile_picture=NULL, banner=NULL, social_links=NULL,
+                           deleted_at=datetime('now')
            WHERE id=?""",
         f"deleted_user_{user['id']}", DELETED_ACCOUNT_NAME, user["id"],
     )
@@ -1602,6 +1637,137 @@ def logout():
     return redirect(url_for("home"))
 
 
+# Social links ----------------------------------------------------------------
+# The editor's boxes, the stored JSON and the profile's chips all pass through
+# these three functions, so the rules - what counts as a link, how many, how long
+# - live in one place. Every link is checked on the way out of the database as
+# well as on the way in, since a row edited by hand in D1 must not be able to
+# put a ``javascript:`` address on somebody's profile.
+
+
+def normalise_social_url(value):
+    """``(url, problem)`` for one link somebody typed.
+
+    A bare ``youtube.com/@someone`` is accepted and given an https scheme - no
+    one types the scheme into a "your channel" box - and anything that is not an
+    http(s) address on a public domain is refused with the reason.
+
+    The value is not assumed to be a string: this also validates what comes back
+    out of the JSON column, where a hand-edited row can hold absolutely anything,
+    and a number or a nested object must not be able to raise its way out of a
+    profile render.
+    """
+    if not isinstance(value, str):
+        value = "" if value is None else str(value)
+    value = value.strip()
+    if not value:
+        return "", ""
+    if len(value) > MAX_SOCIAL_URL:
+        return "", f"links must be {MAX_SOCIAL_URL} characters or fewer."
+    if re.search(r"\s", value):
+        return "", "links cannot contain spaces."
+    if value.startswith("//"):
+        value = "https:" + value
+    elif not value.lower().startswith(("http://", "https://")):
+        value = "https://" + value.lstrip("/")
+    if not is_public_url(value):
+        return "", (
+            "that is not a link we can use - include the domain,"
+            " for example youtube.com/@you."
+        )
+    return value, ""
+
+
+def parse_social_links(form):
+    """``(links, problem)`` from the profile form's social boxes.
+
+    One problem is enough to refuse the whole save, so a typo is never silently
+    dropped: the editor says which box it came from and nothing is written.
+    """
+    links = []
+    for key, label, _placeholder in SOCIAL_PLATFORMS:
+        url, problem = normalise_social_url(form.get(f"social_{key}"))
+        if problem:
+            return None, f"{label}: {problem}"
+        if url:
+            links.append({"platform": key, "label": label, "url": url})
+    # Free-form rows for everything without a box of its own. A row counts when
+    # it holds a link; its name is optional and falls back to the link's domain,
+    # so "mediafire.com/you" does not need a label typed next to it.
+    for index in range(1, MAX_OTHER_SOCIAL_LINKS + 1):
+        label = (form.get(f"other_label_{index}") or "").strip()[:MAX_SOCIAL_LABEL]
+        url, problem = normalise_social_url(form.get(f"other_url_{index}"))
+        if problem:
+            return None, f"Other links, row {index}: {problem}"
+        if not url:
+            continue
+        links.append({
+            "platform": "other",
+            "label": label or site_label(url) or "Link",
+            "url": url,
+        })
+    return links[:MAX_SOCIAL_LINKS], ""
+
+
+def display_social_url(url):
+    """A link as it reads on a profile: no scheme, no trailing slash.
+
+    The About card shows the address rather than just the platform name, since
+    "YouTube" says nothing about *which* channel and the host usually does.
+    """
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    tail = parts.path.rstrip("/")
+    if parts.query:
+        tail += "?" + parts.query
+    return (host + tail)[:80] or url
+
+
+def social_links_of(user):
+    """The links stored on a user row, ready to render - possibly empty.
+
+    Anything unreadable is dropped instead of reported: this runs on every
+    profile view, and a row somebody edited by hand should be able to make a
+    link disappear but never to break the page.
+    """
+    raw = user.get("social_links") if user else None
+    if not raw:
+        return []
+    try:
+        stored = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(stored, list):
+        return []
+    links = []
+    for item in stored:
+        if not isinstance(item, dict):
+            continue
+        url, problem = normalise_social_url(item.get("url"))
+        if problem or not url:
+            continue
+        # A platform key that is missing, unknown or not even a string falls back
+        # to "other" - which is also what the editor's free rows use.
+        key = item.get("platform")
+        if not isinstance(key, str) or key not in SOCIAL_LABELS:
+            key = "other"
+        label = item.get("label")
+        label = label.strip()[:MAX_SOCIAL_LABEL] if isinstance(label, str) else ""
+        links.append({
+            "platform": key,
+            # A known platform always shows its own name; only an "other" link
+            # carries a label the user chose.
+            "label": SOCIAL_LABELS.get(key) or label or site_label(url) or "Link",
+            "url": url,
+            "display": display_social_url(url),
+        })
+        if len(links) >= MAX_SOCIAL_LINKS:
+            break
+    return links
+
+
 def profile_user(username):
     """The profile row for ``username``, or a 404 for an unknown account.
 
@@ -1632,6 +1798,7 @@ def profile(username):
         user=user,
         posts=posts,
         comments=comments,
+        socials=social_links_of(user),
         **state,
         follower_people=follow_list(
             user["id"], "followers", state["viewer_id"], FOLLOW_PREVIEW_LIMIT
@@ -1710,16 +1877,23 @@ def profile_settings():
         elif len(bio) > MAX_BIO_LENGTH:
             flash(f"Your bio must be {MAX_BIO_LENGTH} characters or fewer.", "error")
         else:
+            links, link_error = parse_social_links(request.form)
             picture, picture_error = save_image_upload(request.files.get("profile_picture"))
             banner, banner_error = save_image_upload(request.files.get("banner"))
-            upload_error = picture_error or banner_error
+            upload_error = link_error or picture_error or banner_error
             if upload_error:
                 # Do not keep whichever half of the upload did succeed.
                 for stored in (picture, banner):
                     delete_upload(stored)
                 flash(upload_error, "error")
             else:
-                fields = {"display_name": display_name, "bio": bio or None}
+                fields = {
+                    "display_name": display_name,
+                    "bio": bio or None,
+                    # The list is only ever read and written as a whole, so it
+                    # lives in one JSON column instead of its own table.
+                    "social_links": json.dumps(links) if links else None,
+                }
                 removed = []
                 if picture:
                     fields["profile_picture"] = picture
@@ -1744,7 +1918,25 @@ def profile_settings():
                     delete_upload(filename)
                 flash("Profile updated.", "success")
                 return redirect(url_for("profile_settings"))
-    return render_template("profile_settings.html", user=user, max_bio_length=MAX_BIO_LENGTH)
+    # The editor shows what is stored, with a blank row for every "other" slot
+    # still going spare, and names its boxes after the same platform table the
+    # parser reads, so the two cannot drift apart.
+    socials = social_links_of(user)
+    other_rows = [link for link in socials if link["platform"] == "other"]
+    return render_template(
+        "profile_settings.html",
+        user=user,
+        max_bio_length=MAX_BIO_LENGTH,
+        social_platforms=SOCIAL_PLATFORMS,
+        social_values={link["platform"]: link["url"] for link in socials},
+        other_rows=(
+            other_rows
+            + [{"label": "", "url": ""}] * (MAX_OTHER_SOCIAL_LINKS - len(other_rows))
+        ),
+        max_other_links=MAX_OTHER_SOCIAL_LINKS,
+        max_social_url=MAX_SOCIAL_URL,
+        max_social_label=MAX_SOCIAL_LABEL,
+    )
 
 
 # Site settings ---------------------------------------------------------------

@@ -62,6 +62,37 @@
   {%- endif -%}
 {%- endmacro %}
 
+{# Social links, in two shapes. Both are built from social_links_of(), so every
+   url is already an http(s) address by the time it gets here - and both carry
+   rel="nofollow", because a profile should not be a place to buy link juice. #}
+
+{# The compact chip row the profile header uses. #}
+{% macro social_strip(links) -%}
+  {%- if links -%}
+  <div class="social-strip">
+    {%- for link in links %}
+    <a class="social-chip" href="{{ link.url }}" title="{{ link.url }}"
+       target="_blank" rel="noopener noreferrer nofollow">{{ link.label }}</a>
+    {%- endfor %}
+  </div>
+  {%- endif -%}
+{%- endmacro %}
+
+{# The legible version the About card uses: platform name, then the address, so
+   it is clear *which* channel a link points at. #}
+{% macro social_list(links) -%}
+  {%- if links -%}
+  <ul class="social-list">
+    {%- for link in links %}
+    <li>
+      <span class="social-list-label">{{ link.label }}</span>
+      <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer nofollow">{{ link.display }}</a>
+    </li>
+    {%- endfor %}
+  </ul>
+  {%- endif -%}
+{%- endmacro %}
+
 {# One person in a followers/following list: avatar, name, follower count, bio. #}
 {% macro person_row(person, following=false, next_url='') -%}
 <div class="person-row">

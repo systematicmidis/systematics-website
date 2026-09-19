@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% from "_widgets.html" import avatar, follow_button, person_row, post_card with context %}
+{% from "_widgets.html" import avatar, follow_button, person_row, post_card,
+  social_strip, social_list with context %}
 {% block title %}{{ user.display_name }} · Systematics Black Midi site{% endblock %}
 {% block content %}
 {# Google+-style header: cover, avatar, name, tagline, follower counts and the
@@ -32,6 +33,8 @@
     {% if user.bio %}
       <p class="profile-bio">{{ user.bio|linkify }}</p>
     {% endif %}
+    {# Where else this person is, right under the bio where the eye lands. #}
+    {{ social_strip(socials) }}
     <div class="profile-stats">
       <span><strong>{{ posts|length }}</strong> post{% if posts|length != 1 %}s{% endif %}</span>
       <a href="{{ url_for('followers', username=user.username) }}">
@@ -80,6 +83,14 @@
     <p class="about-bio">{{ user.bio|linkify }}</p>
   {% else %}
     <p class="muted">No bio yet.{% if is_self %} <a href="{{ url_for('profile_settings') }}">Add one</a> to introduce yourself.{% endif %}</p>
+  {% endif %}
+  {% if socials %}
+    <div class="about-links">
+      <h3>Links</h3>
+      {{ social_list(socials) }}
+    </div>
+  {% elif is_self %}
+    <p class="muted">No links yet. <a href="{{ url_for('profile_settings') }}">Add your socials</a> to be findable off-site.</p>
   {% endif %}
   <dl class="about-facts">
     <dt>Username</dt><dd>@{{ user.username }}</dd>

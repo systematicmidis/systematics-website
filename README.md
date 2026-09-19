@@ -1,7 +1,7 @@
 # Systematics Black MIDI site
 
-A small Flask community site (accounts with bios, avatars and custom profile banners,
-followers, posts, two feeds, likes/dislikes and threaded comments) that runs on **Cloudflare Workers**
+A small Flask community site (accounts with bios, avatars, custom profile banners and social
+links, followers, posts, two feeds, likes/dislikes and threaded comments) that runs on **Cloudflare Workers**
 using the Python Workers runtime and D1 - and that fits on the **Workers Free plan, with no
 payment method on file**. See ["Running free"](#running-free-no-payment-method) for what that
 costs and limits.
@@ -294,6 +294,24 @@ alternatives rather than combinable filters.
 **Redirect targets are checked.** `next` values are only honoured when they are
 root-relative (`safe_next()`), so a hand-edited form cannot bounce a visitor to another site;
 the sign-in form uses the same guard.
+
+**Social links are a profile's other addresses.** *Edit profile* has a box per platform
+(YouTube, X (Twitter), TikTok, Instagram, Discord, Twitch, SoundCloud, Bandcamp, GitHub and a
+Website) plus three free rows for anything else, where the name is optional and falls back to
+the link's own domain. They are stored as one JSON array in `users.social_links` rather than a
+column per network (`0010_social_links.sql`), because the sites people use keep changing and an
+"other" link has no fixed name to give a column. The profile header renders them as a chip
+strip under the bio, and the About block lists them with their addresses - "YouTube" alone does
+not say *which* channel.
+
+**Links are validated in both directions.** `normalise_social_url()` accepts a bare
+`youtube.com/@you` (nobody types the scheme into a "your channel" box) and adds `https://`, then
+requires an http(s) address on a public domain - the same `is_public_url()` guard the link-card
+fetcher uses, so `javascript:` or `http://192.168.1.1/` cannot reach a profile. `social_links_of()`
+re-runs that check when reading the column back, so a row edited by hand in D1 can make a link
+disappear but never smuggle one in. One bad link refuses the whole save and names the box it
+came from instead of silently dropping it, a profile is capped at `MAX_SOCIAL_LINKS` (13), and
+closing your account clears the column along with the bio and the images.
 
 ## Schema changes
 
