@@ -1,38 +1,51 @@
 :root {
   --bg: #f1f3f4;
   --card: #fff;
-  --text: #333;
-  --muted: #777;
-  --line: #ddd;
-  --accent: #d93025;
+  --text: #212121;              /* Google+ primary ink: rgba(0,0,0,.87) */
+  --muted: rgba(0,0,0,0.54);    /* Google+ secondary ink */
+  --line: #e0e0e0;              /* Google+ divider */
+  --accent: #db4437;            /* Google+ red */
   --accent-soft: #fce8e6;
   /* Tokens the newer blocks (settings page, owner panel) are written against,
      plus the ones the dark theme remaps. Everything below is also what the
      ``html[data-theme="dark"]`` block at the foot of this file overrides, so a
      rule written with these keeps working in both themes. */
-  --link: #357ae8;              /* link blue */
+  --link: #4285f4;              /* Google+ primary blue: links and primary buttons */
   --link-soft: #e6effd;         /* tint behind a selected blue control */
-  --surface-2: #f8f9fa;         /* inset panels: tiles, notes, link cards */
-  --surface-3: #e5e7e9;         /* hover and active fills */
-  --text-soft: #444;            /* body copy one step down from headings */
-  --text-dim: #999;             /* metadata, timestamps, captions */
-  --border-soft: #eee;          /* hairlines inside a card */
+  --surface-2: #fafafa;         /* inset panels: tiles, notes, link cards */
+  --surface-3: #f5f5f5;         /* hover and active fills */
+  --text-soft: rgba(0,0,0,0.87);/* Google+'s body ink - the same value as --text */
+  --text-dim: #9e9e9e;          /* Google+ tertiary ink: metadata, timestamps */
+  --border-soft: #eeeeee;       /* hairlines inside a card */
   --field: #fff;                /* input background */
   --on-accent: #fff;            /* text on a filled blue/accent button */
-  --shadow: 0 1px 2px rgba(0,0,0,.08);
+  /* Elevation, for surfaces that float over content (the phone rail strip).
+     Google+ reserved its own elevation - 0 8px 10px 1px rgba(0,0,0,.14) and two
+     more layers - for menus and dialogs, and drew stream cards flat. */
+  --shadow: 0 1px 3px rgba(0,0,0,.12);
   color-scheme: light;
-  font-family: Arial, Helvetica, sans-serif;
+  /* Google+ 2016's own stack, read out of the inline CSS in its archived pages:
+     Roboto first (the @font-face block above it in that CSS), with the same
+     Helvetica/Arial fallbacks it declared. */
+  font-family: Roboto, RobotoDraft, Helvetica, Arial, sans-serif;
 }
 * { box-sizing: border-box; }
 body {
-  margin:0; background:var(--bg); color:var(--text); font-size:14px;
+  /* 14px/20px is Google+'s base pairing: its CSS pairs 14px with 20px more than
+     any other combination (then 14px with 18px for tighter rows). */
+  margin:0; background:var(--bg); color:var(--text); font-size:14px; line-height:20px;
   /* Stop iOS Safari inflating text, and never let the page scroll sideways. */
   -webkit-text-size-adjust:100%;
   overflow-x:hidden;
 }
 img { max-width:100%; }
-a { color:#357ae8; text-decoration:none; }
+a { color:#4285f4; text-decoration:none; }
 a:hover { text-decoration:underline; }
+/* Google+ set emphasis at weight 500, never 700: its CSS pairs ``font: 500 20px
+   Roboto`` with ``font-weight: 400`` and uses 500 forty-four times to 400's
+   twelve. Browsers default ``b``/``strong`` to 700, which is heavier than
+   anything in that scale, so route them through the real weight. */
+b, strong { font-weight:500; }
 
 /* The rail and the stream ---------------------------------------------------
    Google+ kept every link in a rail against the left edge of the window, put the
@@ -63,7 +76,7 @@ a:hover { text-decoration:underline; }
 .rail-brand {
   display:block;
   padding:6px 12px 12px;
-  color:#666;
+  color:rgba(0,0,0,0.54);
   font-size:19px;
   font-weight:400;
   letter-spacing:-.4px;
@@ -75,7 +88,7 @@ a:hover { text-decoration:underline; }
 .rail-group {
   margin-top:12px;
   padding-top:12px;
-  border-top:1px solid #d5d5d5;
+  border-top:1px solid #e0e0e0;
 }
 .rail-link {
   display:flex;
@@ -86,26 +99,26 @@ a:hover { text-decoration:underline; }
   border:0;
   border-radius:3px;
   background:none;
-  color:#555;
+  color:rgba(0,0,0,0.87);
   font:inherit;
   font-size:13px;
   text-align:left;
   cursor:pointer;
 }
-.rail-link:hover { background:#e5e7e9; text-decoration:none; }
-.rail-link.is-active { background:#ddd; color:#333; font-weight:bold; }
+.rail-link:hover { background:var(--surface-3); text-decoration:none; }
+.rail-link.is-active { background:#eeeeee; color:rgba(0,0,0,0.87); font-weight:500; }
 .rail-icon { flex:0 0 16px; display:inline-block; text-align:center; }
 .rail-theme { margin-top:4px; }
 .rail-foot { margin-top:auto; padding-top:14px; }
 .rail-note {
   margin:14px 6px 0;
   padding-top:14px;
-  border-top:1px solid #d5d5d5;
-  color:#777;
+  border-top:1px solid #e0e0e0;
+  color:rgba(0,0,0,0.54);
   font-size:12px;
-  line-height:1.5;
+  line-height:18px;
 }
-.rail-note strong { color:#555; }
+.rail-note strong { color:rgba(0,0,0,0.87); }
 .rail-note p { margin:5px 0 0; }
 
 /* The column: one narrow stream, centred in the space the rail leaves over, with
@@ -124,7 +137,7 @@ footer { margin-top:auto; }
   from { opacity:0; transform:translateY(8px); }
   to   { opacity:1; transform:translateY(0); }
 }
-.feed > * { animation:stream-in .24s cubic-bezier(.2,.7,.3,1) both; }
+.feed > * { animation:stream-in .3s cubic-bezier(0,0,0.2,1) both; }
 .feed > *:nth-child(2) { animation-delay:36ms; }
 .feed > *:nth-child(3) { animation-delay:72ms; }
 .feed > *:nth-child(4) { animation-delay:108ms; }
@@ -134,20 +147,21 @@ footer { margin-top:auto; }
 
 .feed-header {
   background:#fff;
-  border:1px solid #d7d7d7;
+  border:1px solid #e0e0e0;
   padding:20px 22px;
   margin-bottom:12px;
-  box-shadow:0 1px 2px rgba(0,0,0,.06);
 }
 .feed-header h1 { margin:0 0 4px; font-size:24px; font-weight:400; }
-.feed-header p { margin:0; color:#888; }
+.feed-header p { margin:0; color:rgba(0,0,0,0.54); }
 
 .post-card {
   background:var(--card);
-  border:1px solid #d5d5d5;
+  /* Flat, like Google+'s stream cards were: a hairline and no shadow. Its CSS
+     keeps elevation (0 1px 4px rgba(0,0,0,.14)) for raised surfaces - menus and
+     dialogs - not for a card sitting in a stream. */
+  border:1px solid #e0e0e0;
   border-radius:2px;
   margin-bottom:14px;
-  box-shadow:0 1px 2px rgba(0,0,0,.08);
 }
 .post-head {
   padding:14px 16px 8px;
@@ -162,19 +176,19 @@ footer { margin-top:auto; }
   justify-content:center;
   background:#555;
   color:#fff;
-  font-weight:bold;
+  font-weight:500;
   border-radius:50%;
 }
 .avatar { width:40px; height:40px; font-size:12px; }
-.small-avatar { width:32px; height:32px; font-size:11px; }
-.post-author { display:flex; flex-direction:column; line-height:1.35; }
-.post-author strong { color:#333; }
-.post-author span { color:#999; font-size:11px; }
+.small-avatar { width:32px; height:32px; font-size:12px; }
+.post-author { display:flex; flex-direction:column; line-height:18px; }
+.post-author strong { color:rgba(0,0,0,0.87); }
+.post-author span { color:#9e9e9e; font-size:12px; }
 .more {
   margin-left:auto;
   border:0;
   background:transparent;
-  color:#aaa;
+  color:rgba(0,0,0,0.54);
   font-size:22px;
   padding:0 5px;
   cursor:pointer;
@@ -183,15 +197,19 @@ footer { margin-top:auto; }
 .post-body h1, .post-body h2 {
   margin:6px 0 12px;
   font-weight:400;
-  color:#333;
+  color:rgba(0,0,0,0.87);
 }
+/* A headline in a stream card stays in body ink: Google+ put a post's text in
+   rgba(0,0,0,.87) and never coloured a heading blue. It still underlines on
+   hover through the global ``a:hover`` rule above. */
+.post-body h2 a { color:inherit; }
 .post-body h1 { font-size:28px; }
 .post-body h2 { font-size:21px; }
 .post-body p, .post-content {
   margin:0;
-  line-height:1.55;
+  line-height:20px;
   white-space:pre-wrap;
-  color:#444;
+  color:rgba(0,0,0,0.87);
 }
 .post-content { font-size:15px; }
 .post-link { display:inline-block; margin-top:8px; }
@@ -202,15 +220,15 @@ footer { margin-top:auto; }
   padding:9px 20px;
   border-top:1px solid #eee;
   border-bottom:1px solid #eee;
-  color:#777;
+  color:rgba(0,0,0,0.54);
   font-size:12px;
 }
 .post-actions span { cursor:pointer; }
-.post-actions span:hover { color:#357ae8; }
+.post-actions span:hover { color:#4285f4; }
 
 .comment-preview { padding:10px 20px; font-size:12px; }
 .comments { padding:12px 20px 22px; }
-.comments h3 { font-size:13px; font-weight:normal; color:#777; margin:3px 0 14px; }
+.comments h3 { font-size:13px; font-weight:500; color:rgba(0,0,0,0.54); margin:3px 0 14px; }
 .comment {
   display:flex;
   gap:10px;
@@ -218,8 +236,8 @@ footer { margin-top:auto; }
   border-top:1px solid #eee;
 }
 .comment-main { min-width:0; }
-.comment-main strong { color:#333; }
-.comment-main span { color:#aaa; font-size:10px; margin-left:5px; }
+.comment-main strong { color:rgba(0,0,0,0.87); }
+.comment-main span { color:#9e9e9e; font-size:12px; margin-left:5px; }
 .comment-main p { margin:3px 0 0; white-space:pre-wrap; }
 .comment-form { display:flex; gap:10px; padding-top:15px; }
 .comment-inputs { flex:1; }
@@ -229,54 +247,56 @@ input, textarea, select {
   border:1px solid #ccc;
   border-radius:2px;
   background:#fff;
-  color:#333;
+  color:rgba(0,0,0,0.87);
   font:inherit;
   padding:9px 10px;
   outline:none;
 }
 textarea { resize:vertical; margin-top:7px; }
-input:focus, textarea:focus { border-color:#9aa7b4; box-shadow:0 0 0 1px #e2e6ea; }
+/* Google+'s one accent for an active control was its blue, so a focused field
+   takes #4285f4 rather than a grey of its own. */
+input:focus, textarea:focus { border-color:#4285f4; box-shadow:0 0 0 1px #e6effd; }
 button[type=submit], .button {
   border:1px solid #bbb;
   border-radius:2px;
   background:#f5f5f5;
-  color:#555;
+  color:rgba(0,0,0,0.87);
   padding:8px 14px;
   cursor:pointer;
-  font-weight:bold;
+  font-weight:500;
   margin-top:7px;
 }
 button[type=submit]:hover, .button:hover { background:#e8e8e8; text-decoration:none; }
-.muted, .empty { color:#999; }
-.empty { background:#fff; border:1px solid #ddd; padding:30px; text-align:center; }
+.muted, .empty { color:#9e9e9e; }
+.empty { background:#fff; border:1px solid #e0e0e0; padding:30px; text-align:center; }
 
-.flash { padding:10px 14px; margin-bottom:12px; background:#fff; border:1px solid #ddd; }
+.flash { padding:10px 14px; margin-bottom:12px; background:#fff; border:1px solid #e0e0e0; }
 .flash.error { border-left:4px solid var(--accent); }
 
 .auth-card, .editor {
-  background:#fff; border:1px solid #d5d5d5; padding:25px; box-shadow:0 1px 2px rgba(0,0,0,.08);
+  background:#fff; border:1px solid #e0e0e0; padding:25px;
 }
 .auth-card { max-width:500px; margin:70px auto; }
 .editor { max-width:800px; }
 .auth-card h1, .editor h1 { font-size:26px; font-weight:400; margin-top:0; }
-.editor label { display:block; margin:14px 0; font-weight:bold; }
+.editor label { display:block; margin:14px 0; font-weight:500; }
 .editor .actions { display:flex; gap:10px; align-items:center; }
 .editor .actions a { padding:8px 14px; }
 
 .admin-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; }
 .admin-header h1 { font-weight:400; }
-.admin-row { background:#fff; border:1px solid #ddd; border-bottom:0; padding:14px; display:flex; justify-content:space-between; gap:20px; }
-.admin-row:last-child { border-bottom:1px solid #ddd; }
+.admin-row { background:#fff; border:1px solid #e0e0e0; border-bottom:0; padding:14px; display:flex; justify-content:space-between; gap:20px; }
+.admin-row:last-child { border-bottom:1px solid #e0e0e0; }
 .admin-row strong { display:block; }
-.admin-row small { color:#999; display:block; margin-top:3px; }
+.admin-row small { color:#9e9e9e; display:block; margin-top:3px; }
 .actions { display:flex; gap:12px; align-items:center; }
-.actions a { color:#357ae8; }
+.actions a { color:#4285f4; }
 .danger { color:#c5221f; background:none; border:0; cursor:pointer; }
 
 footer {
   text-align:center;
-  color:#999;
-  font-size:11px;
+  color:#9e9e9e;
+  font-size:12px;
   padding:0 0 30px;
 }
 
@@ -302,8 +322,9 @@ footer {
     height:auto;
     overflow:visible;
     background:#fff;
-    border-bottom:1px solid #d8d8d8;
-    box-shadow:0 1px 3px rgba(0,0,0,.12);
+    border-bottom:1px solid #e0e0e0;
+    /* The one floating surface in the app: it sits over the stream as it scrolls. */
+    box-shadow:var(--shadow);
     padding:6px 10px 7px;
     z-index:20;
   }
@@ -330,7 +351,7 @@ footer {
     padding:0;
     border:0;
   }
-  .rail-group { margin-left:6px; padding-left:6px; border-left:1px solid #ddd; }
+  .rail-group { margin-left:6px; padding-left:6px; border-left:1px solid #e0e0e0; }
   .rail-link { width:auto; white-space:nowrap; }
   .rail-theme { margin-top:0; }
   .rail-note { display:none; }
@@ -389,73 +410,73 @@ footer {
   .about-facts { grid-template-columns:104px 1fr; }
 }
 
-small { color:#999; font-weight:normal; display:block; margin-top:4px; }
+small { color:#9e9e9e; font-weight:normal; display:block; margin-top:4px; }
 .auth-card { margin-top:50px; }
 .auth-card h1 { margin-top:0; font-size:28px; font-weight:400; }
-.auth-bottom { margin-top:20px; color:#777; border-top:1px solid #eee; padding-top:15px; }
+.auth-bottom { margin-top:20px; color:rgba(0,0,0,0.54); border-top:1px solid #eee; padding-top:15px; }
 .avatar-img { object-fit:cover; overflow:hidden; }
 .site-avatar { background:#555; }
-.login-to-comment { margin-top:15px; padding:14px; background:#f7f7f7; border:1px solid #e4e4e4; color:#777; }
-.profile-card { background:#fff; border:1px solid #d5d5d5; box-shadow:0 1px 2px rgba(0,0,0,.08); margin-bottom:18px; }
+.login-to-comment { margin-top:15px; padding:14px; background:#f7f7f7; border:1px solid #e4e4e4; color:rgba(0,0,0,0.54); }
+.profile-card { background:#fff; border:1px solid #e0e0e0; margin-bottom:18px; }
 .profile-cover { height:105px; background:linear-gradient(135deg,#555,#888); position:relative; overflow:hidden; }
 .profile-banner { display:block; width:100%; height:100%; object-fit:cover; }
 .profile-info { position:relative; padding:0 22px 24px; }
-.profile-avatar { width:92px; height:92px; margin-top:-46px; border:4px solid #fff; border-radius:50%; background:#555; color:#fff; display:flex; align-items:center; justify-content:center; font-size:32px; font-weight:bold; object-fit:cover; }
+.profile-avatar { width:92px; height:92px; margin-top:-46px; border:4px solid #fff; border-radius:50%; background:#555; color:#fff; display:flex; align-items:center; justify-content:center; font-size:32px; font-weight:500; object-fit:cover; }
 .profile-info h1 { margin:8px 0 0; font-size:28px; font-weight:400; }
-.username { color:#888; margin-top:1px; }
-.user-id { margin-top:8px; color:#777; font-size:12px; }
+.username { color:rgba(0,0,0,0.54); margin-top:1px; }
+.user-id { margin-top:8px; color:rgba(0,0,0,0.54); font-size:12px; }
 .user-id code { background:#f1f1f1; padding:2px 5px; }
-.section-label { color:#777; border-bottom:1px solid #ddd; padding:10px 3px; margin-top:18px; }
-.profile-comment { background:#fff; border:1px solid #ddd; border-top:0; padding:14px 18px; }
+.section-label { font-weight:500; color:rgba(0,0,0,0.54); border-bottom:1px solid #e0e0e0; padding:10px 3px; margin-top:18px; }
+.profile-comment { background:#fff; border:1px solid #e0e0e0; border-top:0; padding:14px 18px; }
 .profile-comment p { margin:0 0 6px; white-space:pre-wrap; }
-.profile-comment span { color:#999; font-size:12px; }
+.profile-comment span { color:#9e9e9e; font-size:12px; }
 .profile-bio {
   margin:10px 0 0;
   max-width:560px;
-  color:#555;
-  line-height:1.55;
+  color:rgba(0,0,0,0.87);
+  line-height:20px;
   white-space:pre-wrap;
 }
 
 /* Google+-style profile: name and Follow button on one row, counts under it --- */
 .profile-name-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 .profile-actions { padding-top:12px; }
-.profile-stats { margin-top:12px; color:#777; font-size:13px; display:flex; gap:18px; flex-wrap:wrap; }
-.profile-stats strong { color:#333; }
-.profile-stats a { color:#777; text-decoration:none; }
-.profile-stats a:hover { color:#357ae8; }
+.profile-stats { margin-top:12px; color:rgba(0,0,0,0.54); font-size:13px; display:flex; gap:18px; flex-wrap:wrap; }
+.profile-stats strong { color:rgba(0,0,0,0.87); }
+.profile-stats a { color:rgba(0,0,0,0.54); text-decoration:none; }
+.profile-stats a:hover { color:#4285f4; }
 
 .follow-form { margin:0; }
 .follow-button {
-  display:inline-block; padding:6px 16px; border:1px solid #357ae8; border-radius:2px;
-  background:#357ae8; color:#fff; font-size:13px; font-weight:bold; cursor:pointer;
-  text-decoration:none; line-height:1.5;
+  display:inline-block; padding:6px 16px; border:1px solid #4285f4; border-radius:2px;
+  background:#4285f4; color:#fff; font-size:13px; font-weight:500; cursor:pointer;
+  text-decoration:none; line-height:20px;
 }
 .follow-button:hover { background:#2d6ac9; }
-.follow-button.following { background:#fff; color:#357ae8; }
+.follow-button.following { background:#fff; color:#4285f4; }
 .follow-button.following:hover { background:#f2f7ff; }
-.follow-self { color:#999; font-size:12px; }
+.follow-self { color:#9e9e9e; font-size:12px; }
 
 /* Followers / following lists ------------------------------------------------- */
 .people-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:18px; }
 @media (max-width: 780px) { .people-grid { grid-template-columns:1fr; } }
-.people-card { background:#fff; border:1px solid #d5d5d5; box-shadow:0 1px 2px rgba(0,0,0,.08); padding:14px 16px 6px; }
-.people-card h2 { font-size:15px; font-weight:bold; margin:0; }
+.people-card { background:#fff; border:1px solid #e0e0e0; padding:14px 16px 6px; }
+.people-card h2 { font-size:15px; font-weight:500; margin:0; }
 .section-heading { display:flex; justify-content:space-between; align-items:baseline; border-bottom:1px solid #eee; padding-bottom:9px; margin-bottom:6px; }
-.section-more { font-size:12px; color:#357ae8; text-decoration:none; }
+.section-more { font-size:12px; color:#4285f4; text-decoration:none; }
 .section-more:hover { text-decoration:underline; }
-.person-row { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px solid #f1f1f1; }
+.person-row { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px solid #eeeeee; }
 .person-row:last-child { border-bottom:0; }
 .person-main { flex:1; min-width:0; }
 .person-main a { color:inherit; text-decoration:none; }
 .person-main a:hover strong { text-decoration:underline; }
-.person-meta { display:block; color:#999; font-size:12px; margin-top:2px; }
-.person-bio { margin:4px 0 0; color:#666; font-size:12px; line-height:1.5; }
+.person-meta { display:block; color:#9e9e9e; font-size:12px; margin-top:2px; }
+.person-bio { margin:4px 0 0; color:rgba(0,0,0,0.54); font-size:12px; line-height:18px; }
 .person-row .follow-button { padding:4px 12px; font-size:12px; }
 
 /* Connections page (a profile's full follower or following list) -------------- */
 .connections-cover { height:80px; background:linear-gradient(135deg,#555,#888); overflow:hidden; }
-.connections-head { background:#fff; border:1px solid #d5d5d5; box-shadow:0 1px 2px rgba(0,0,0,.08); margin-bottom:14px; }
+.connections-head { background:#fff; border:1px solid #e0e0e0; margin-bottom:14px; }
 .connections-user { display:flex; align-items:center; gap:12px; padding:14px 18px; }
 .connections-who { flex:1; min-width:0; }
 .connections-who h1 { margin:0; font-size:20px; font-weight:400; }
@@ -463,11 +484,11 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .connections-who h1 a:hover { text-decoration:underline; }
 
 /* The About block ------------------------------------------------------------ */
-.about-card { background:#fff; border:1px solid #d5d5d5; box-shadow:0 1px 2px rgba(0,0,0,.08); padding:16px 18px; }
-.about-bio { margin:0 0 12px; color:#555; line-height:1.6; white-space:pre-wrap; }
+.about-card { background:#fff; border:1px solid #e0e0e0; padding:16px 18px; }
+.about-bio { margin:0 0 12px; color:rgba(0,0,0,0.87); line-height:20px; white-space:pre-wrap; }
 .about-facts { display:grid; grid-template-columns:120px 1fr; gap:6px 12px; margin:0; font-size:13px; }
-.about-facts dt { color:#999; }
-.about-facts dd { margin:0; color:#444; }
+.about-facts dt { color:#9e9e9e; }
+.about-facts dd { margin:0; color:rgba(0,0,0,0.87); }
 .about-facts code { background:#f1f1f1; padding:2px 5px; }
 
 .setting-block { margin-top:20px; padding-top:16px; border-top:1px solid #eee; }
@@ -475,15 +496,15 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .setting-visual { margin-top:4px; }
 .setting-banner {
   display:block; width:100%; max-width:340px; height:85px; object-fit:cover;
-  border:1px solid #d5d5d5; background:linear-gradient(135deg,#555,#888);
+  border:1px solid #e0e0e0; background:linear-gradient(135deg,#555,#888);
 }
 .setting-banner-empty { display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; }
 .setting-avatar {
-  display:block; width:72px; height:72px; border:1px solid #d5d5d5; border-radius:50%;
+  display:block; width:72px; height:72px; border:1px solid #e0e0e0; border-radius:50%;
   background:#555; color:#fff; object-fit:cover;
 }
-.setting-avatar-empty { display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:bold; }
-.checkbox { display:block; margin-top:10px; color:#777; }
+.setting-avatar-empty { display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:500; }
+.checkbox { display:block; margin-top:10px; color:rgba(0,0,0,0.54); }
 .checkbox input[type=checkbox] { width:auto; margin-right:6px; vertical-align:middle; }
 
 /* Social links: the editor's grid, the chip strip on a profile header and the
@@ -491,19 +512,19 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
    no rules of its own (see the theme block at the foot of this file). */
 .setting-heading { font-size:16px; font-weight:400; margin:0 0 4px; }
 .setting-subheading {
-  font-size:11px; font-weight:bold; text-transform:uppercase; letter-spacing:.5px;
+  font-size:12px; font-weight:500; text-transform:uppercase; letter-spacing:.5px;
   color:var(--text-dim); margin:18px 0 0;
 }
 .setting-note { margin:0 0 8px; color:var(--muted); font-size:12px; }
 .setting-note code {
   background:var(--surface-2); border:1px solid var(--border-soft);
-  border-radius:2px; padding:1px 4px; font-size:11px; color:var(--text-soft);
+  border-radius:2px; padding:1px 4px; font-size:12px; color:var(--text-soft);
 }
 .social-grid { display:grid; grid-template-columns:1fr 1fr; gap:2px 14px; }
 /* Beats ".setting-block label", which gives every label in the block a margin. */
 .setting-block .social-field { margin:0; }
 .social-field-label {
-  display:block; font-size:11px; font-weight:bold; color:var(--text-dim);
+  display:block; font-size:12px; font-weight:500; color:var(--text-dim);
   margin-bottom:3px;
 }
 .social-other-row { display:flex; gap:8px; margin-top:8px; }
@@ -511,13 +532,13 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .social-other-row input:last-child { flex:1; min-width:0; }
 .social-strip { display:flex; flex-wrap:wrap; gap:6px; margin-top:12px; }
 .social-chip {
-  display:inline-block; padding:3px 11px; font-size:12px; font-weight:bold;
+  display:inline-block; padding:3px 11px; font-size:12px; font-weight:500;
   color:var(--text-soft); background:var(--surface-2);
   border:1px solid var(--line); border-radius:14px;
 }
 .social-chip:hover { background:var(--surface-3); color:var(--link); text-decoration:none; }
 .about-links h3 {
-  font-size:11px; text-transform:uppercase; letter-spacing:.5px;
+  font-size:12px; text-transform:uppercase; letter-spacing:.5px;
   color:var(--text-dim); margin:16px 0 0;
 }
 .social-list { list-style:none; margin:6px 0 0; padding:0; }
@@ -526,7 +547,7 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
   border-top:1px solid var(--border-soft); font-size:13px;
 }
 .social-list li:first-child { border-top:0; }
-.social-list-label { flex:0 0 110px; color:var(--text-dim); font-size:12px; font-weight:bold; }
+.social-list-label { flex:0 0 110px; color:var(--text-dim); font-size:12px; font-weight:500; }
 .social-list a { min-width:0; overflow-wrap:anywhere; }
 @media (max-width:640px) {
   .social-grid { grid-template-columns:1fr; }
@@ -537,32 +558,32 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 
 /* Feed tabs: All / Community / Systematics --------------------------------- */
 .tabs {
-  display:flex; gap:2px; margin:0 0 12px; border-bottom:1px solid #d5d5d5;
+  display:flex; gap:2px; margin:0 0 12px;  border-bottom:1px solid #e0e0e0;
   flex-wrap:wrap; /* on a phone the four tabs are wider than the screen */
 }
 .tab {
-  padding:9px 15px; color:#777; font-size:13px; text-decoration:none;
+  padding:9px 15px; color:rgba(0,0,0,0.54); font-size:13px; text-decoration:none;
   border:1px solid transparent; border-bottom:0; margin-bottom:-1px;
 }
-.tab:hover { color:#357ae8; }
+.tab:hover { color:#4285f4; }
 .tab.active {
-  background:#fff; border-color:#d5d5d5; color:#333; font-weight:bold;
+  background:#fff; border-color:#e0e0e0; color:rgba(0,0,0,0.87); font-weight:500;
 }
 .tab-count {
   display:inline-block; margin-left:5px; padding:0 6px; border-radius:9px;
-  background:#eee; color:#777; font-size:11px; font-weight:normal;
+  background:#eee; color:rgba(0,0,0,0.54); font-size:12px; font-weight:normal;
 }
-.tab.active .tab-count { background:#e6effd; color:#357ae8; }
+.tab.active .tab-count { background:#e6effd; color:#4285f4; }
 .feed-cta { margin:0 0 14px; }
 
 /* Post author, category badge and votes ------------------------------------ */
 .badge {
-  display:inline-block; padding:1px 7px; border-radius:9px; font-size:10px;
+  display:inline-block; padding:1px 7px; border-radius:9px; font-size:12px;
   text-transform:uppercase; letter-spacing:.4px;
 }
-.badge-community { background:#eef1f5; color:#5b6b7d; }
-.badge-systematics { background:#e6effd; color:#357ae8; }
-.post-head .more { font-size:12px; color:#357ae8; text-decoration:none; padding:2px 4px; }
+.badge-community { background:#eeeeee; color:rgba(0,0,0,0.54); }
+.badge-systematics { background:#e6effd; color:#4285f4; }
+.post-head .more { font-size:12px; color:#4285f4; text-decoration:none; padding:2px 4px; }
 .post-head .more:hover { text-decoration:underline; }
 .post-manage { margin-left:auto; display:flex; align-items:center; gap:10px; }
 .post-manage .more { margin-left:0; }
@@ -572,35 +593,35 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .vote-bar {
   display:flex; align-items:center; gap:14px;
   padding:8px 20px; border-top:1px solid #eee;
-  font-size:12px; color:#777;
+  font-size:12px; color:rgba(0,0,0,0.54);
 }
-.vote-bar .score { font-weight:bold; color:#555; min-width:20px; }
+.vote-bar .score { font-weight:500; color:rgba(0,0,0,0.87); min-width:20px; }
 .score.positive { color:#1a7f37; }
 .score.negative { color:#c5221f; }
 .vote-form { display:flex; gap:4px; }
 .vote {
-  border:1px solid #d5d5d5; background:#fafafa; color:#777; cursor:pointer;
+  border:1px solid #e0e0e0; background:#fafafa; color:rgba(0,0,0,0.54); cursor:pointer;
   font-size:12px; line-height:1; padding:5px 9px; border-radius:2px;
 }
-.vote:hover { border-color:#357ae8; color:#357ae8; }
-.vote.active { background:#357ae8; border-color:#357ae8; color:#fff; }
+.vote:hover { border-color:#4285f4; color:#4285f4; }
+.vote.active { background:#4285f4; border-color:#4285f4; color:#fff; }
 .vote.signin { text-decoration:none; padding:4px 9px; }
-.comment-link { color:#777; text-decoration:none; }
-.comment-link:hover { color:#357ae8; }
+.comment-link { color:rgba(0,0,0,0.54); text-decoration:none; }
+.comment-link:hover { color:#4285f4; }
 
 /* Threaded comments -------------------------------------------------------- */
 .comment-meta a { color:inherit; }
 .comment-replies { margin-left:42px; padding-left:10px; border-left:2px solid #eee; }
 .reply-box { margin-top:6px; }
-.reply-box summary { cursor:pointer; color:#777; font-size:12px; }
-.reply-box summary:hover { color:#357ae8; }
+.reply-box summary { cursor:pointer; color:rgba(0,0,0,0.54); font-size:12px; }
+.reply-box summary:hover { color:#4285f4; }
 .comment-form.compact { padding-top:8px; gap:8px; }
 .comment-form.compact textarea { font-size:13px; }
 .comment-form.compact button { align-self:flex-start; }
-.profile-post { background:#fff; border:1px solid #ddd; border-top:0; padding:12px 18px; }
-.profile-post a { text-decoration:none; color:#333; }
-.profile-post a:hover { color:#357ae8; }
-.profile-post span { display:block; margin-top:3px; color:#999; font-size:12px; }
+.profile-post { background:#fff; border:1px solid #e0e0e0; border-top:0; padding:12px 18px; }
+.profile-post a { text-decoration:none; color:rgba(0,0,0,0.87); }
+.profile-post a:hover { color:#4285f4; }
+.profile-post span { display:block; margin-top:3px; color:#9e9e9e; font-size:12px; }
 
 /* Link cards ---------------------------------------------------------------- */
 /* Built from the target page's Open Graph tags when a post is saved, so the
@@ -612,57 +633,57 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
   margin:14px 0 4px;
   max-width:520px;
   padding:10px 12px;
-  background:#f8f9fa;
-  border:1px solid #e3e6ea;
+  background:#fafafa;
+  border:1px solid #e0e0e0;
   border-left:4px solid #cfd8e3;
   border-radius:4px;
-  color:#333;
+  color:rgba(0,0,0,0.87);
 }
-.link-card:hover { text-decoration:none; background:#f2f7fd; border-left-color:#357ae8; }
+.link-card:hover { text-decoration:none; background:#e6effd; border-left-color:#4285f4; }
 .link-thumb {
   width:88px;
   height:88px;
   flex:0 0 88px;
   object-fit:cover;
   background:#fff;
-  border:1px solid #e3e6ea;
+  border:1px solid #e0e0e0;
   border-radius:3px;
 }
 .link-text { display:flex; flex-direction:column; gap:3px; min-width:0; }
 .link-title {
-  color:#1a1a1a;
+  color:rgba(0,0,0,0.87);
   font-size:15px;
-  font-weight:bold;
-  line-height:1.3;
+  font-weight:500;
+  line-height:20px;
   overflow:hidden;
   display:-webkit-box;
   -webkit-line-clamp:2;
   -webkit-box-orient:vertical;
 }
 .link-desc {
-  color:#666;
+  color:rgba(0,0,0,0.54);
   font-size:13px;
-  line-height:1.4;
+  line-height:18px;
   overflow:hidden;
   display:-webkit-box;
   -webkit-line-clamp:2;
   -webkit-box-orient:vertical;
 }
-.link-site { margin-top:auto; color:#999; font-size:12px; }
+.link-site { margin-top:auto; color:#9e9e9e; font-size:12px; }
 .link-card-compact .link-desc { display:none; }
 
 /* Admin: posts section ----------------------------------------------------- */
 .refresh-links { display:inline-block; margin-left:8px; }
 .refresh-links button {
-  border:1px solid #d8d8d8;
+  border:1px solid #e0e0e0;
   background:#fff;
-  color:#555;
+  color:rgba(0,0,0,0.87);
   font-size:12px;
   padding:5px 10px;
   border-radius:3px;
   cursor:pointer;
 }
-.refresh-links button:hover { border-color:#357ae8; color:#357ae8; }
+.refresh-links button:hover { border-color:#4285f4; color:#4285f4; }
 
 /* Settings page: appearance switch, account facts, owner panel ----------------
    Written against the tokens in :root above rather than literal colours, so
@@ -672,8 +693,9 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .settings-header { margin-bottom:14px; }
 .settings-card {
   background:var(--card);
+  /* Flat, like the stream cards: Google+ kept elevation for menus and dialogs,
+     not for a panel of settings sitting in a page. */
   border:1px solid var(--line);
-  box-shadow:var(--shadow);
   padding:18px 22px 20px;
   margin-bottom:14px;
 }
@@ -697,7 +719,7 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 }
 .theme-option:hover { border-color:var(--link); }
 .theme-option.active { border-color:var(--link); background:var(--link-soft); }
-.theme-option-text { display:flex; flex-direction:column; line-height:1.35; min-width:0; }
+.theme-option-text { display:flex; flex-direction:column; line-height:18px; min-width:0; }
 .theme-option-text strong { font-size:14px; }
 .theme-option-text small { margin-top:2px; color:var(--text-dim); }
 .theme-swatch { flex:0 0 40px; width:40px; height:40px; border:1px solid #cfd4dc; border-radius:3px; }
@@ -718,18 +740,18 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
 .owner-tag {
   display:inline-block; padding:1px 7px; border-radius:9px;
   background:var(--accent-soft); color:var(--accent);
-  font-size:10px; font-weight:bold; text-transform:uppercase; letter-spacing:.4px;
+  font-size:12px; font-weight:500; text-transform:uppercase; letter-spacing:.4px;
 }
 .owner-stats {
   display:grid; grid-template-columns:repeat(auto-fill, minmax(132px, 1fr));
   gap:10px; margin:16px 0 4px;
 }
 .owner-stat { background:var(--surface-2); border:1px solid var(--line); border-radius:3px; padding:10px 12px; }
-.owner-stat-value { display:block; font-size:20px; font-weight:bold; color:var(--text); }
-.owner-stat-label { display:block; color:var(--text-dim); font-size:11px; margin-top:2px; }
+.owner-stat-value { display:block; font-size:20px; font-weight:500; color:var(--text); }
+.owner-stat-label { display:block; color:var(--text-dim); font-size:12px; margin-top:2px; }
 .owner-note { margin:10px 0 0; color:var(--muted); font-size:12px; }
 .owner-subhead {
-  font-size:12px; text-transform:uppercase; letter-spacing:.6px; font-weight:bold;
+  font-size:12px; text-transform:uppercase; letter-spacing:.6px; font-weight:500;
   color:var(--muted); margin:24px 0 10px;
   border-bottom:1px solid var(--border-soft); padding-bottom:6px;
 }
@@ -740,7 +762,7 @@ small { color:#999; font-weight:normal; display:block; margin-top:4px; }
   border-bottom:1px solid var(--border-soft);
 }
 .owner-row:last-child { border-bottom:0; }
-.owner-row .avatar { width:30px; height:30px; font-size:11px; }
+.owner-row .avatar { width:30px; height:30px; font-size:12px; }
 .owner-row-main { flex:1; min-width:0; }
 .owner-row-main a { color:var(--text); }
 .owner-row-main small { color:var(--text-dim); }
@@ -768,7 +790,7 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
    it is written against the tokens in :root, so the dark theme at the foot of
    this file themes it without any rules of its own. */
 .eyebrow {
-  margin:0 0 4px; font-size:11px; font-weight:bold; letter-spacing:1.2px;
+  margin:0 0 4px; font-size:12px; font-weight:500; letter-spacing:1.2px;
   text-transform:uppercase; color:var(--text-dim);
 }
 .ban-notice {
@@ -780,7 +802,7 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
   margin-bottom:12px;
 }
 .ban-notice strong { display:block; color:var(--accent); margin-bottom:4px; }
-.ban-notice ul { margin:0 0 6px; padding-left:18px; color:var(--text-soft); line-height:1.55; }
+.ban-notice ul { margin:0 0 6px; padding-left:18px; color:var(--text-soft); line-height:20px; }
 .ban-notice a { font-size:12px; }
 
 .ban-panel {
@@ -789,7 +811,7 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
   padding:12px 16px; margin-top:18px;
 }
 .ban-panel h3 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:var(--accent); }
-.ban-panel ul { margin:0 0 6px; padding-left:18px; color:var(--text-soft); line-height:1.55; }
+.ban-panel ul { margin:0 0 6px; padding-left:18px; color:var(--text-soft); line-height:20px; }
 
 .danger-zone { margin-top:22px; padding-top:16px; border-top:1px solid var(--border-soft); }
 .danger-zone h3 { margin:0 0 6px; font-size:14px; color:var(--text); }
@@ -799,17 +821,17 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
    file, which is where the dark theme's versions of those live too. */
 .danger-button { display:inline-block; margin-top:0; padding:9px 16px; cursor:pointer;
   border:1px solid var(--accent); border-radius:2px;
-  background:var(--accent); color:var(--on-accent); font:inherit; font-weight:bold; }
+  background:var(--accent); color:var(--on-accent); font:inherit; font-weight:500; }
 .danger-button:hover { filter:brightness(1.08); text-decoration:none; }
 .danger-card { border-top:4px solid var(--accent); max-width:620px; }
-.delete-list { margin:14px 0; padding-left:20px; color:var(--text-soft); line-height:1.6; }
+.delete-list { margin:14px 0; padding-left:20px; color:var(--text-soft); line-height:20px; }
 .delete-list li { margin-bottom:5px; }
 .owner-warning {
   background:var(--accent-soft); border-left:4px solid var(--accent);
   border-radius:3px; padding:12px 14px; margin:16px 0; color:var(--text-soft);
 }
 .owner-warning strong { color:var(--accent); }
-.owner-warning p { margin:6px 0 0; line-height:1.55; }
+.owner-warning p { margin:6px 0 0; line-height:20px; }
 .owner-warning code { background:var(--surface-3); padding:1px 5px; }
 .login-to-comment.banned { border-left:4px solid var(--accent); color:var(--text-soft); }
 
@@ -825,7 +847,7 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
 .ban-reason-note { display:block; margin-top:7px; color:var(--text-dim); }
 .ban-controls { display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
 .ban-controls form { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-end; }
-.ban-field { display:flex; flex-direction:column; gap:2px; font-size:11px; color:var(--text-dim); }
+.ban-field { display:flex; flex-direction:column; gap:2px; font-size:12px; color:var(--text-dim); }
 .ban-field select { width:auto; padding:5px 6px; font-size:12px; }
 .ban-reason { width:170px; padding:5px 6px; font-size:12px; }
 .ban-controls button { margin-top:0; padding:6px 10px; font-size:12px; }
@@ -1018,7 +1040,7 @@ html[data-theme="dark"] .refresh-links button:hover { border-color:var(--link); 
 a.danger-button, button.danger-button {
   display:inline-block; margin-top:0; padding:9px 16px; cursor:pointer;
   border:1px solid var(--accent); border-radius:2px;
-  background:var(--accent); color:var(--on-accent); font:inherit; font-weight:bold;
+  background:var(--accent); color:var(--on-accent); font:inherit; font-weight:500;
 }
 a.danger-button:hover, button.danger-button:hover {
   filter:brightness(1.08); text-decoration:none;

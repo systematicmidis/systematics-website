@@ -22,6 +22,14 @@
       document.documentElement.setAttribute('data-theme', theme);
     })();
   </script>
+  {# Google+ rendered in Roboto. style.css names it first in the stack, but
+     neither Windows nor iOS ships it, so fetch it from Google's font CDN - the
+     same source the archived page used. Only the two weights its scale actually
+     declares are requested (400 body, 500 titles and emphasis; nothing in that
+     scale is 700). The Helvetica/Arial fallbacks stay in the stack, so the page
+     is unchanged if this request fails. #}
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&amp;display=swap">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js" defer></script>
 </head>

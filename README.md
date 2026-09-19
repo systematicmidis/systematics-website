@@ -280,10 +280,64 @@ layout**. Because the rail is inside `body { overflow-x:hidden }`, every new rul
 sideways has to do it on an element inside the rail rather than on the page.
 
 **Page changes fade and rise.** Each child of `.feed` runs one `stream-in` animation on load
-(opacity 0 to 1, 8px up, 240ms), with the first four items staggered 36ms apart, so a navigation
-reads as the stream swapping in place instead of the window blinking. It is a CSS animation, not
+(opacity 0 to 1, 8px up, 300ms on `cubic-bezier(0,0,0.2,1)`), with the first four items staggered
+36ms apart, so a navigation reads as the stream swapping in place instead of the window blinking.
+Both numbers are Google+'s: its CSS ran its transitions in a 100-400ms band on two easings, and
+the one doing almost all the work was this decelerate curve. It is a CSS animation, not
 JavaScript, so nothing has to run for a page to be readable, and
 `@media (prefers-reduced-motion: reduce)` switches it off for anyone who asked for that.
+
+## Design tokens (read out of Google+ 2016's own CSS)
+
+The colours, type scale and spacings in `public/static/style.css` are not eyeballed from a
+screenshot. Google+ inlined its whole stylesheet into each page - 116KB of it, with obfuscated
+class names like `.XVzU0b` and quantumWiz animation names - so the archived pages carry the real
+declared values. Read one back with the `id_` modifier, which returns the original rather than
+Wayback's rewritten copy:
+
+```bash
+curl -sS --max-time 120 -A 'Mozilla/5.0' \
+  'https://web.archive.org/web/20161123160000id_/https://plus.google.com/+Google/posts' \
+  -o /tmp/gplus.html
+```
+
+What the stylesheet declares, and what this site therefore uses:
+
+| Token | Value | Where it came from |
+| --- | --- | --- |
+| Font stack | `Roboto, RobotoDraft, Helvetica, Arial, sans-serif` | its `font-family`, including the `RobotoDraft` alias |
+| Base type | `14px / 20px` | the most frequent pairing in its file (then 14px/18px for tighter rows) |
+| Emphasised type | weight **500** | 44 uses of 500 against 12 of 400 - nothing in the scale is 700 |
+| Smallest type | **12px** | its scale runs 12, 13, 14, 16, 18, 20, 24, 34 - there is no 10px or 11px in it |
+| Primary ink | `rgba(0,0,0,0.87)` (`#212121`) | its most-used text colour, also what a stream post renders in |
+| Secondary ink | `rgba(0,0,0,0.54)` | icon fills and 16px/500 labels |
+| Tertiary ink | `#9e9e9e` | timestamps and metadata captions |
+| Divider | `#e0e0e0` | `border-top:1px solid #e0e0e0` on its cards |
+| Link / primary blue | `#4285f4` | 30 uses, e.g. `.HQ8yf a { color:#4285f4 }` |
+| Google red | `#db4437` | accents and destructive states |
+| Card | `#fff`, `border-radius:2px`, **no shadow** | 2px is its workhorse radius; elevation (`0 8px 10px 1px rgba(0,0,0,.14)` + two layers) was for menus and dialogs, not a card in a stream |
+| Hover fills | `#f5f5f5`, `#fafafa` | `.cjGgHb .Vmcec:hover { background-color:#fafafa }` |
+| Spacing | 8px grid: `0 16px`, `16px`, `0 24px`, `8px` | its most frequent paddings |
+
+Three rules follow from the table and are easy to undo by accident:
+
+- **`--shadow` is not for cards.** The tokens declare it so the phone rail strip (the one surface
+  that floats over scrolling content) has one, but a card in the stream is a hairline and nothing
+  else. Adding a shadow back to `.post-card` is a visible departure from the reference.
+- **Nothing typed by a person drops below 12px**, because nothing in Google+'s scale did. A new
+  metadata line at 11px is off-scale rather than merely small.
+- **`b` and `strong` are 500 globally**, so a heading written with `<strong>` lands in the
+  declared weight instead of the browser's 700.
+
+Roboto is fetched from Google's font CDN in `base.html` (windows and iOS do not ship it), and only
+the two weights the scale declares - 400 and 500. The stack keeps Helvetica and Arial behind it,
+so the page is unchanged if that request fails.
+
+Two things the reference does not settle, recorded so nobody re-derives them: the measured page
+field in the archived screenshot is `#f1f1f1`, but no `#f1f1f1` appears in the CSS - its surfaces
+are `#eeeeee`/`#f5f5f5`/`#fafafa` - so `--bg` keeps the `#f1f3f4` it already had. And transitions
+cannot be read out of a still image or an 11-second clip of a static page, which is why the only
+motion values here are the ones the CSS declares.
 
 ## Followers and profiles
 
