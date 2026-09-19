@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import avatar with context %}
+{% block title %}Settings · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header settings-header">
+  <h1>Settings</h1>
+  <p>Appearance, your account, and - for the site owner - the state of the site.</p>
+</div>
+
+{# Appearance -----------------------------------------------------------------
+   The theme lives in the browser (localStorage), not in the database, so it also
+   works for signed-out visitors and applies before the first paint. The two
+   buttons are plain buttons: the server does not need to know the answer. #}
+<section class="settings-card">
+  <div class="settings-card-head">
+    <h2>Appearance</h2>
+    <span class="settings-current">Now: <strong data-theme-current>light</strong></span>
+  </div>
+  <p class="muted">Pick the look you want. It is remembered in this browser only.</p>
+  <div class="theme-switch" role="group" aria-label="Colour theme">
+    <button type="button" class="theme-option" data-theme-choice="light" aria-pressed="false">
+      <span class="theme-swatch theme-swatch-light" aria-hidden="true"></span>
+      <span class="theme-option-text">
+        <strong>Light</strong>
+        <small>Dark text on light surfaces</small>
+      </span>
+    </button>
+    <button type="button" class="theme-option" data-theme-choice="dark" aria-pressed="false">
+      <span class="theme-swatch theme-swatch-dark" aria-hidden="true"></span>
+      <span class="theme-option-text">
+        <strong>Dark</strong>
+        <small>Light text on near-black surfaces</small>
+      </span>
+    </button>
+  </div>
+  <noscript>
+    <p class="muted">JavaScript is switched off, so the theme cannot be remembered. The
+      site follows your system's light/dark preference instead.</p>
+  </noscript>
+</section>
+
+{# Account -------------------------------------------------------------------- #}
+<section class="settings-card">
+  <h2>Account</h2>
+  {% if current_user %}
+    <dl class="settings-facts">
+      <dt>Signed in as</dt>
+      <dd>{{ current_user.display_name }} <span class="muted">@{{ current_user.username }}</span>
+        {% if is_owner %}<span class="owner-tag">Site owner</span>{% endif %}</dd>
+      <dt>User ID</dt>
+      <dd><code>{{ current_user.user_id }}</code></dd>
+      <dt>Member since</dt>
+      <dd>{{ (current_user.created_at or '')[:10] }}</dd>
+    </dl>
+    <div class="settings-links">
+      <a class="button" href="{{ url_for('profile_settings') }}">Edit profile</a>
+      <a class="button" href="{{ url_for('profile', username=current_user.username) }}">My profile</a>
+      <a class="button" href="{{ url_for('followers', username=current_user.username) }}">My followers</a>
+      <a class="button" href="{{ url_for('logout') }}">Sign out</a>
+    </div>
+  {% else %}
+    <p class="muted">You are browsing as a visitor. Appearance settings above work anyway;
+      posting, commenting and following need an account.</p>
+    <div class="settings-links">
+      <a class="button" href="{{ url_for('register') }}">Create an account</a>
+      <a class="button" href="{{ url_for('login', next=url_for('settings')) }}">Sign in</a>
+    </div>
+  {% endif %}
+</section>
+
+{# Owner panel ----------------------------------------------------------------
+   Rendered only for OWNER_USERNAMES, and every action it posts to is gated by
+   @owner_required on the server as well. #}
+{% if owner %}
+<section class="settings-card owner-card" id="owner">
+  <div class="settings-card-head">
+    <h2>Site owner</h2>
+    <span class="owner-tag">Only you can see this</span>
+  </div>
+  <p class="muted">
+    Owner-only view of the whole site: totals, configuration actually in effect, drafts
+    nobody else can open, and the newest accounts. Nothing here is visible to visitors.
+  </p>
+
+  <div class="owner-stats">
+    {% for label, value in [
+        ('Accounts', stats.users),
+        ('Published posts', stats.published),
+        ('Drafts', stats.drafts),
+        ('Comments', stats.comments),
+        ('Votes', stats.votes),
+        ('Follows', stats.follows),
+        ('Images stored', stats.uploads),
+        ('Image bytes', stats.upload_bytes|filesize),
+        ('Link cards', stats.link_cards),
+        ('Cards with images', stats.link_images),
+    ] %}
+      <div class="owner-stat">
+        <span class="owner-stat-value">{{ value }}</span>
+        <span class="owner-stat-label">{{ label }}</span>
+      </div>
+    {% endfor %}
+  </div>
+
+  {% if stats.orphan_posts %}
+    <p class="owner-note">
+      {{ stats.orphan_posts }} post{% if stats.orphan_posts != 1 %}s have{% else %} has{% endif %}
+      no author (the seeded welcome post does this until an owner account claims it).
+    </p>
+  {% endif %}
+
+  <h3 class="owner-subhead">Owner actions</h3>
+  <div class="settings-links">
+    <a class="button" href="{{ url_for('new_post') }}">Write a Systematics post</a>
+    <a class="button" href="{{ url_for('admin') }}">Admin panel</a>
+  </div>
+  <form class="owner-action" method="post" action="{{ url_for('settings_refresh_links') }}">
+    <button type="submit">Rebuild link cards</button>
+    <small>Re-reads the page behind every post that contains a link, up to
+      {{ max_link_refresh }} per run. The admin panel does the same thing.</small>
+  </form>
+
+  <h3 class="owner-subhead">Configuration in effect</h3>
+  <dl class="owner-facts">
+    {% for label, value in config %}
+      <dt>{{ label }}</dt>
+      <dd>{{ value }}</dd>
+    {% endfor %}
+  </dl>
+
+  <h3 class="owner-subhead">Drafts ({{ drafts|length }})</h3>
+  {% if drafts %}
+    <div class="owner-list">
+      {% for item in drafts %}
+        <div class="owner-row">
+          <div class="owner-row-main">
+            <a href="{{ url_for('post', post_id=item.id) }}">{{ item.title }}</a>
+            <small>
+              {{ item.status }} · {{ item.category }} · {{ (item.created_at or '')[:16] }}
+              {% if item.author_username %} · @{{ item.author_username }}{% endif %}
+            </small>
+          </div>
+          <a class="owner-row-link" href="{{ url_for('edit_post', post_id=item.id) }}">Edit</a>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No drafts right now.</p>
+  {% endif %}
+
+  <h3 class="owner-subhead">Newest accounts</h3>
+  {% if signups %}
+    <div class="owner-list">
+      {% for person in signups %}
+        <div class="owner-row">
+          {{ avatar(person.profile_picture, person.display_name) }}
+          <div class="owner-row-main">
+            <a href="{{ url_for('profile', username=person.username) }}">{{ person.display_name }}</a>
+            <small>@{{ person.username }} · joined {{ (person.created_at or '')[:10] }}
+              · {{ person.post_count }} post{% if person.post_count != 1 %}s{% endif %}
+              · {{ person.follower_count }} follower{% if person.follower_count != 1 %}s{% endif %}</small>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted">No accounts yet.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

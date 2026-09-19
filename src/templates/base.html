@@ -4,7 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}Systematics Black Midi site{% endblock %}</title>
+  {# Theme, before anything is painted. Reading localStorage here (rather than in
+     the deferred script at the end of the body) is what stops a dark-mode visitor
+     seeing a white flash on every navigation. A first-time visitor follows their
+     system's preference; the switch on the settings page overrides it from then
+     on. #}
+  <script>
+    (function () {
+      var theme = null;
+      try { theme = localStorage.getItem('smm-theme'); } catch (e) { theme = null; }
+      if (theme !== 'light' && theme !== 'dark') {
+        try {
+          theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark' : 'light';
+        } catch (e) { theme = 'light'; }
+      }
+      document.documentElement.setAttribute('data-theme', theme);
+    })();
+  </script>
   <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/theme.js" defer></script>
 </head>
 <body>
 <header class="topbar">
@@ -14,14 +33,22 @@
       <a href="{{ url_for('home') }}">Home</a>
       {% if current_user %}
         <a href="{{ url_for('new_post') }}">Write</a>
-        <a href="{{ url_for('profile', username=current_user.username) }}">{{ current_user.display_name }}</a>
+        <a href="{{ url_for('profile', username=current_user.username) }}">{{ current_user.display_name }}{% if is_owner %} <span class="owner-tag">owner</span>{% endif %}</a>
         <a href="{{ url_for('profile_settings') }}">Profile</a>
-        <a href="{{ url_for('logout') }}">Sign out</a>
       {% else %}
         <a href="{{ url_for('login') }}">Sign in</a>
         <a href="{{ url_for('register') }}">Join</a>
       {% endif %}
       {% if is_admin %}<a href="{{ url_for('admin') }}">Manage</a>{% else %}<a href="{{ url_for('admin_login') }}">Admin</a>{% endif %}
+      <a class="nav-settings" href="{{ url_for('settings') }}">⚙ Settings</a>
+      {# A one-click flip for people who just want to dim the page; the same
+         choice lives on the settings page, and both go through theme.js. #}
+      <button class="theme-quick" type="button" data-theme-toggle
+              title="Switch between light and dark" aria-label="Switch between light and dark">
+        <span class="theme-quick-light" aria-hidden="true">☀</span>
+        <span class="theme-quick-dark" aria-hidden="true">☾</span>
+      </button>
+      {% if current_user %}<a href="{{ url_for('logout') }}">Sign out</a>{% endif %}
     </nav>
   </div>
 </header>
@@ -34,6 +61,10 @@
       <a class="side-link" href="{{ url_for('home', feed='following') }}">☰ &nbsp; Following stream</a>
       <a class="side-link" href="{{ url_for('profile', username=current_user.username) }}">● &nbsp; My profile</a>
       <a class="side-link" href="{{ url_for('followers', username=current_user.username) }}">◍ &nbsp; My followers</a>
+    {% endif %}
+    <a class="side-link" href="{{ url_for('settings') }}">⚙ &nbsp; Settings</a>
+    {% if is_owner %}
+      <a class="side-link side-link-owner" href="{{ url_for('settings') }}#owner">◆ &nbsp; Owner tools</a>
     {% endif %}
     <div class="sidebar-note">
       <strong>Systematics Black Midi site</strong>

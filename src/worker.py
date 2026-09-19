@@ -437,11 +437,27 @@ def is_admin():
     return g.is_admin
 
 
+def is_owner():
+    """True only for an account listed in OWNER_USERNAMES.
+
+    Stricter than :func:`is_admin`, which the shared ADMIN_PASSWORD also opens:
+    the owner panel on the settings page, and everything it can do, is for the
+    account(s) named in OWNER_USERNAMES and nobody else. The list comes from the
+    Worker variable of the same name (wrangler.jsonc), so adding a second owner
+    account is a config change rather than a code change.
+    """
+    if "is_owner" not in g:
+        user = current_user()
+        g.is_owner = bool(user and is_owner_username(user["username"]))
+    return g.is_owner
+
+
 @app.context_processor
 def inject_globals():
     return {
         "current_user": current_user(),
         "is_admin": is_admin(),
+        "is_owner": is_owner(),
     }
 
 
@@ -461,6 +477,25 @@ def admin_required(f):
         if not is_admin():
             flash("Sign in as a site owner to manage the site.", "error")
             return redirect(url_for("admin_login"))
+        return f(*args, **kwargs)
+    return wrapper
+
+
+def owner_required(f):
+    """Gate for the owner-only half of the settings page.
+
+    A signed-in account that is not an owner gets sent back to their own
+    settings; a signed-out visitor is asked to sign in first. The template
+    hides this section, but the check lives here too - hiding markup is not
+    access control, and these routes are reachable by hand.
+    """
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not is_owner():
+            flash("That part of settings is for the site owner.", "error")
+            if session.get("user_db_id"):
+                return redirect(url_for("settings"))
+            return redirect(url_for("login", next=request.path))
         return f(*args, **kwargs)
     return wrapper
 
@@ -687,6 +722,22 @@ def linkify(value, limit=None):
 
 
 app.jinja_env.filters["linkify"] = linkify
+
+
+def human_filesize(value):
+    """Bytes as a short human string, for the owner's storage line."""
+    try:
+        size = float(value or 0)
+    except (TypeError, ValueError):
+        return "0 B"
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+app.jinja_env.filters["filesize"] = human_filesize
 
 
 def http_fetch():
@@ -1453,6 +1504,103 @@ def profile_settings():
     return render_template("profile_settings.html", user=user, max_bio_length=MAX_BIO_LENGTH)
 
 
+# Site settings ---------------------------------------------------------------
+# One page, three audiences. "Appearance" is for everybody including anonymous
+# visitors (the theme lives in the browser, see public/static/theme.js), the
+# account section is a signpost for signed-in people, and the owner panel is
+# rendered only for OWNER_USERNAMES. Everything behind that panel is read-only
+# except the link-card rebuild, which reuses the admin panel's own routine.
+
+
+def site_stats():
+    """Every count the owner panel shows, in a single round trip to D1."""
+    return first("""
+        SELECT (SELECT COUNT(*) FROM users) AS users,
+               (SELECT COUNT(*) FROM posts) AS posts,
+               (SELECT COUNT(*) FROM posts WHERE status='published') AS published,
+               (SELECT COUNT(*) FROM posts WHERE status<>'published') AS drafts,
+               (SELECT COUNT(*) FROM posts WHERE user_id IS NULL) AS orphan_posts,
+               (SELECT COUNT(*) FROM comments) AS comments,
+               (SELECT COUNT(*) FROM post_votes) AS votes,
+               (SELECT COUNT(*) FROM follows) AS follows,
+               (SELECT COUNT(*) FROM uploads) AS uploads,
+               (SELECT COALESCE(SUM(size), 0) FROM uploads) AS upload_bytes,
+               (SELECT COUNT(*) FROM link_previews) AS link_cards,
+               (SELECT COUNT(*) FROM link_previews WHERE image IS NOT NULL) AS link_images
+    """) or {}
+
+
+def owner_drafts(limit=10):
+    """Unpublished posts, newest first - the ones nobody else can find."""
+    return query(f"""
+        SELECT posts.id, posts.title, posts.category, posts.status,
+               posts.created_at, users.username AS author_username
+        FROM posts LEFT JOIN users ON users.id = posts.user_id
+        WHERE posts.status <> 'published'
+        ORDER BY posts.created_at DESC, posts.id DESC
+        LIMIT {int(limit)}
+    """)
+
+
+def recent_signups(limit=8):
+    """The newest accounts, so the owner can see who has joined."""
+    return query(f"""
+        SELECT users.username, users.display_name, users.created_at,
+               users.profile_picture,
+               (SELECT COUNT(*) FROM posts WHERE posts.user_id=users.id) AS post_count,
+               (SELECT COUNT(*) FROM follows WHERE follows.followed_id=users.id)
+                   AS follower_count
+        FROM users
+        ORDER BY users.created_at DESC, users.id DESC
+        LIMIT {int(limit)}
+    """)
+
+
+def owner_config():
+    """The effective values this Worker is running with, for the owner panel.
+
+    Read-only by design: these come from wrangler.jsonc, the dashboard or the
+    code, so showing them here is how the owner checks what is actually live
+    without opening the Cloudflare dashboard.
+    """
+    worker_env = env()
+    admin_secret = getattr(worker_env, "ADMIN_PASSWORD", None)
+    return [
+        ("Owner accounts", ", ".join(sorted(owner_usernames())) or "(none)"),
+        ("Admin password", "set" if admin_secret else "not set (using the default)"),
+        ("Password work factor", f"{password_iterations():,} PBKDF2 iterations"),
+        ("Max image size", f"{MAX_IMAGE_BYTES // 1000} KB"),
+        ("Remember-me sessions", f"{REMEMBER_SESSION_DAYS} days"),
+        ("Link cards", f"refreshed after {LINK_PREVIEW_TTL_SECONDS // 86400} days, "
+                        f"{MAX_LINK_REFRESH_PER_RUN} per rebuild"),
+    ]
+
+
+@app.route("/settings")
+def settings():
+    """Settings: appearance for everyone, owner tools only for the site owner."""
+    owner = is_owner()
+    context = {"owner": owner}
+    if owner:
+        context.update(
+            stats=site_stats(),
+            drafts=owner_drafts(),
+            signups=recent_signups(),
+            config=owner_config(),
+            max_link_refresh=MAX_LINK_REFRESH_PER_RUN,
+        )
+    return render_template("settings.html", **context)
+
+
+@app.post("/settings/refresh-links")
+@owner_required
+def settings_refresh_links():
+    """Owner-only: rebuild every link card without leaving the settings page."""
+    checked, cards = refresh_link_cards()
+    flash_refresh_result(checked, cards)
+    return redirect(url_for("settings") + "#owner")
+
+
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     if request.method == "POST":
@@ -1496,18 +1644,18 @@ def delete_comment(comment_id):
     return redirect(url_for("admin") + "#comments")
 
 
-@app.post("/admin/refresh-links")
-@admin_required
-def admin_refresh_links():
+def refresh_link_cards(max_posts=MAX_LINK_REFRESH_PER_RUN):
     """Re-fetch the link cards for posts that contain a URL.
 
     Covers posts written before link cards existed, and refresh is what makes a
     card whose target page was down resolvable later without editing the post.
+    Shared by the admin panel and the owner settings panel; returns
+    ``(checked, rebuilt)`` so each caller can word its own flash message.
     """
     rows = query("SELECT id, content FROM posts ORDER BY id DESC")
     checked = cards = 0
     for row in rows:
-        if checked >= MAX_LINK_REFRESH_PER_RUN:
+        if checked >= max_posts:
             break
         url = extract_post_link(row["content"], request.host.split(":")[0])
         if not url:
@@ -1516,11 +1664,24 @@ def admin_refresh_links():
         if ensure_link_preview(url, force=True):
             cards += 1
         execute("UPDATE posts SET link_url=? WHERE id=?", url, row["id"])
+    return checked, cards
+
+
+def flash_refresh_result(checked, cards):
+    """Tell the editor what a link-card rebuild did (or that there was nothing)."""
     if not checked:
         flash("No posts with links to refresh.", "error")
     else:
         flash(f"Checked {checked} link{'s' if checked != 1 else ''}, "
               f"rebuilt {cards} card{'s' if cards != 1 else ''}.", "success")
+
+
+@app.post("/admin/refresh-links")
+@admin_required
+def admin_refresh_links():
+    """Admin panel entry point for the shared link-card rebuild."""
+    checked, cards = refresh_link_cards()
+    flash_refresh_result(checked, cards)
     return redirect(url_for("admin") + "#posts")
 
 

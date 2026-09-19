@@ -100,6 +100,36 @@ before you share the site - usernames are unique, so whoever registers it first 
 user (for example from a device you do not want to log in on). It is set with
 `npx wrangler secret put ADMIN_PASSWORD`.
 
+## Settings page
+
+`/settings` - reached from **⚙ Settings** in the nav, in the sidebar, or on a phone from the
+same nav - has three sections, and each is shown to a different audience.
+
+**Appearance** is for everybody, including signed-out visitors: a **Light / Dark** switch. The
+choice is stored in the browser (`localStorage`, key `smm-theme`), never in the database, so it
+works without an account and needs no round trip. `<html data-theme="light|dark">` is set by a
+tiny inline script in `src/templates/base.html` *before* anything is painted, which is what
+stops a dark-mode visitor seeing a white flash on every navigation, and
+`public/static/theme.js` handles the clicks and keeps every control in step. Until somebody
+picks a theme explicitly the site follows the operating system's own preference and keeps
+following it live. All the colours live in the `html[data-theme="dark"]` block at the foot of
+`public/static/style.css`; the rest of that file is untouched, so light mode cannot regress.
+The ☾ / ☀ button in the top bar is the same switch in one click.
+
+**Account** is a signpost for signed-in people (display name, user ID, member since, links to
+profile settings, your profile, your followers, sign out) and a "create an account" prompt for
+everyone else.
+
+**Site owner** appears *only* for the accounts in `OWNER_USERNAMES`. It shows totals for the
+whole site (accounts, published posts, drafts, comments, votes, follows, images stored and
+their total size, link cards), the configuration actually in effect (owner accounts, whether
+`ADMIN_PASSWORD` is set, the PBKDF2 work factor, max image size, session lifetime, link-card
+TTL), the draft posts nobody else can open, the newest accounts, and two owner actions: write
+a Systematics post, or rebuild every link card. The panel is rendered conditionally *and* the
+only action behind it, `POST /settings/refresh-links`, is gated by `@owner_required` - hiding
+markup is not access control. To add a second owner, add the username to `OWNER_USERNAMES` in
+`wrangler.jsonc` (or the dashboard) and redeploy; no code change is involved.
+
 ## Posting, feeds, votes and replies
 
 **Anyone with an account can post.** Signed-in users see "Write" in the nav and a
