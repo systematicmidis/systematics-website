@@ -14,40 +14,6 @@
     </label>
 
     <div class="setting-block">
-      <h2 class="setting-heading">Social links</h2>
-      <p class="setting-note">
-        Where else people can find you. Only the boxes you fill in appear on your
-        profile &mdash; leave the rest empty. A bare <code>youtube.com/@you</code> is
-        fine; the <code>https://</code> is added for you.
-      </p>
-      <div class="social-grid">
-        {% for key, label, placeholder in social_platforms %}
-        <label class="social-field">
-          <span class="social-field-label">{{ label }}</span>
-          <input name="social_{{ key }}" value="{{ social_values.get(key, '') }}"
-                 maxlength="{{ max_social_url }}" placeholder="{{ placeholder }}"
-                 inputmode="url" spellcheck="false" autocomplete="off">
-        </label>
-        {% endfor %}
-      </div>
-
-      <h3 class="setting-subheading">Other platforms</h3>
-      <p class="setting-note">
-        Anything without a box of its own: a forum, a MediaFire folder, your own site.
-        Leave the name blank and the link's own domain is used.
-      </p>
-      {% for row in other_rows %}
-      <div class="social-other-row">
-        <input name="other_label_{{ loop.index }}" value="{{ row.label }}"
-               maxlength="{{ max_social_label }}" placeholder="Platform">
-        <input name="other_url_{{ loop.index }}" value="{{ row.url }}"
-               maxlength="{{ max_social_url }}" placeholder="example.com/you"
-               inputmode="url" spellcheck="false" autocomplete="off">
-      </div>
-      {% endfor %}
-    </div>
-
-    <div class="setting-block">
       <div class="setting-visual">
         {% if user.banner %}
           <img class="setting-banner" src="{{ url_for('uploads', filename=user.banner) }}" alt="Your current banner">
