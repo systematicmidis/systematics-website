@@ -12,4 +12,31 @@
   </form>
   <p class="auth-bottom">Don't have an account? <a href="{{ url_for('register') }}">Create one</a>.</p>
 </div>
+
+{# A banned account has no inbox to open - the ban is what removed the session -
+   so its notice is shown here, on the one page the person can still reach and
+   has just proven they own. #}
+{% if ban_notice %}
+<article class="message ban-notice-message">
+  <header class="message-head">
+    <span class="avatar bot-avatar" aria-hidden="true">✦</span>
+    <div class="message-head-text">
+      <h1>{{ ban_notice.subject }}</h1>
+      <small>{{ ban_notice.sender_label }} · automatic · {{ ban_notice.created_at }} UTC</small>
+    </div>
+  </header>
+  <div class="message-body">{{ ban_notice.body|linkify }}</div>
+  {% if ban_notice.about_id %}
+    <div class="message-about">
+      <span class="message-about-label">
+        {{ 'Comment' if ban_notice.about_kind == 'comment' else 'Post' }} this was about
+      </span>
+      {% if ban_notice.about_excerpt %}<blockquote>{{ ban_notice.about_excerpt }}</blockquote>{% endif %}
+      <a class="message-about-link" href="{{ ban_notice.about_url }}">
+        {{ ban_notice.about_title or 'Open it' }}
+      </a>
+    </div>
+  {% endif %}
+</article>
+{% endif %}
 {% endblock %}

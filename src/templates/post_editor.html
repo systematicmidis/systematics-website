@@ -11,7 +11,7 @@
     {% if post %}
       <p class="muted">
         {% if post.status == 'draft' %}Draft preview{% else %}Live{% endif %} at
-        <a href="{{ url_for('post', post_id=post.id) }}"><code>/post/{{ post.id }}</code></a>
+        <a href="{{ post_url(post) }}"><code>{{ post_url(post) }}</code></a>
         {%- if post.status == 'draft' %} (only you and site owners can see it){% endif %}
       </p>
     {% endif %}
@@ -45,6 +45,12 @@
       <textarea name="content" rows="16" required>{{ post.content if post else '' }}</textarea>
       <span class="muted">Paste a download or project link and the post gets a preview card
         with the page's title, image and site.</span>
+      <span class="muted">To link words rather than show the address, write them as
+        <code>[the words](https://example.com)</code>.</span>
+      <span class="muted">Two tokens fill themselves in: <code>[DATE]</code> becomes this
+        post's date and time, shown on each reader's own clock, and <code>[COMMITS]</code>
+        becomes the newest commits from GitHub, one line each - which is how an update log
+        stays current without being edited.</span>
     </label>
     <div class="actions">
       <button type="submit">{% if post %}Save changes{% else %}Publish post{% endif %}</button>

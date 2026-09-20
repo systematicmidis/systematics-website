@@ -10,6 +10,7 @@ costs and limits.
 | --- | --- | --- |
 | Flask app (routes + Jinja templates) | Python Workers (`workers-py` / `pywrangler`) | `src/worker.py`, `src/templates/` |
 | Users (with bios), posts, comments, votes, follows | D1 (SQLite) binding `DB` | `migrations/` |
+| Conversations, their messages, and the moderation log | D1 tables `conversations`, `messages`, `moderation_log` | `migrations/0014_messages.sql`, `0015_direct_messages.sql` |
 | Uploaded profile pictures and banners | D1 `uploads` table (BLOB rows) | `migrations/0005_uploads_in_d1.sql` |
 | Stylesheets | Workers static assets binding `ASSETS` | `public/static/` |
 
@@ -145,7 +146,7 @@ leaving one-sided threads behind. What goes instead is everything that identifie
 
 | Kept | Removed |
 | --- | --- |
-| the row, their posts, their comments, their votes | display name (becomes `[ Account Deleted ]`), username (released, freed for reuse), password hash, bio, avatar, banner, every `follows` row in either direction |
+| the row, their posts, their comments, their votes, the moderation log, every conversation they were in | display name (becomes `[ Account Deleted ]`), username (released, freed for reuse), password hash, bio, avatar, banner, every `follows` row in either direction |
 
 Their profile then 404s like an unknown account, their comments and posts render as
 `[ Account Deleted ]` with a ✕ avatar and no profile link, and the account can never sign in
@@ -154,7 +155,7 @@ again. The admin panel lists them as `deleted` with nothing left to restrict.
 ## Bans
 
 Moderation lives in the admin panel (`/admin`, section *Accounts*), where every account row has a
-**Ban** box, a **For** box and an optional reason. The six bans are:
+**Ban** box, a **For** box, a **Because of** box and an optional reason. The six bans are:
 
 | Ban | What it stops |
 | --- | --- |
@@ -179,9 +180,109 @@ and your own account cannot be banned: owner rights would survive a ban, so it w
 owner out of their own panel. Lifting is a per-account **Lift bans** button (or `kind=account`,
 `comment` or `post` to clear just one).
 
-Both features are migration `0009_account_deletion_and_bans.sql`, which adds columns to `users` -
-so run `npm run db:remote` **before** the deploy that carries this code, since the GitHub Action
-ships code and never migrations.
+**Because of** is what makes a ban explain itself later. It is a list of that
+account's own newest posts and comments (built by `moderatable_content()`, two queries for the
+whole page rather than one per account); picking one attaches it to the ban, and the panel then
+shows it on the account row as *"Because of their comment on …"* and keeps it in the **Moderation
+history** at the foot of the page. The reason and the attached post or comment are also sent to
+the banned person - see **Messages** below.
+
+Bans are migration `0009_account_deletion_and_bans.sql`, which adds columns to `users`, and the
+inbox they write into is migration `0014_messages.sql` (and the conversations it is made of,
+`0015_direct_messages.sql`) - so run `npm run db:remote` **before** the
+deploy that carries this code, since the GitHub Action ships code and never migrations.
+
+## Messages
+
+Messaging is Hangouts-shaped. `/messages` is the inbox - one row per conversation, newest first,
+with whoever spoke last and what they said - and `/messages/c/<id>` is the thread itself: your own
+lines tinted and pushed right, theirs flat on the left, `Seen` on a message the other person has
+opened. The rail carries the unread count, an unread thread is tinted and underlined in red, and
+**Mark all read** clears the lot. A conversation starts from the **Message** button on anybody's
+profile (beside Follow) or from the box at the top of the inbox, which takes a handle. Nothing is
+written until the first line is actually sent, so following a link cannot litter the database with
+empty threads.
+
+A thread belongs to exactly two accounts: `conversations` stores the pair as
+`user_low`/`user_high` (always smaller id first, `UNIQUE(user_low, user_high)`), so the same two
+people cannot end up with two conversations. Every message is a row in `messages` - the table
+migration 0014 introduced - carrying the `conversation_id` it belongs to, `sender_id`,
+`recipient_id` and `read_at`. Unread is therefore just *messages addressed to me with no read
+mark*, per thread or in total, and `last_message_at` is stamped on every send because the inbox
+orders by it. Anyone can message anyone signed in; a third account opening somebody else's thread
+gets a **404**, and posting into it is refused (`@app.route` checks the reader's own id, never an
+id from the address bar).
+
+### The moderation account
+
+The site writes as a real account, not as a disembodied bot label: **`SystematicsModeration`**
+(`MODERATION_USERNAME_DEFAULT`, overridable with the `MODERATION_USERNAME` Worker variable). Ban
+notices, lifted-ban notices and anything an admin types in the panel are messages *from that
+account*, so they land in an ordinary conversation that the person can simply reply to - and the
+reply arrives in the same thread, which the admin panel reads and answers.
+
+That is what `moderation_account()` (one lookup per request, cached on `g`) and
+`conversation_with_moderation()` are for: an admin may read and write the site's side of a thread
+because that account has no session of its own. The panel's **Site messages** section lists those
+conversations with their unread reply counts, opening one marks the site's side read, and the
+**Message &lt;name&gt; as the site** box on any account row writes into the same conversation. A
+thread the admin is standing in shows a note saying whose voice the box below is; the bubbles still
+line up on the site's side, because that is who is speaking.
+
+**If the account is missing, nothing breaks.** A fresh local database (or a renamed account) has
+no voice to write as, so `notice_conversation()` returns nothing, notices are written with
+`conversation_id` NULL, and the inbox lists them under **Notices** instead of dropping them.
+`/messages/<id>` still renders one on its own page, and a ban still applies - it is only the
+threading that is missing. Migration `0015_direct_messages.sql` backfills any notice written before
+the account existed into the thread it would have used, guarded on the account being present.
+
+### What a notice says
+
+`send_ban_notice()` and `send_unban_notice()` compose notices from the ban itself: what was decided,
+how long it lasts, what is still open to the person (phrased from `BAN_SCOPE_NOTES`, beside
+`BAN_MESSAGES` so the banner and the message cannot disagree), the reason the admin typed, and the
+post or comment the ban was attached to - quoted in full and linked, so the notice still explains
+itself after that comment has been deleted. The acting admin is named inside the body
+(`Applied by: <handle>`) because the site speaking and a person speaking should not look like the
+same thing, and the notice ends by inviting a reply, which is now something the person can actually
+do. A temporary ban that simply runs out sends nothing: nobody lifted it, so there is nothing to
+announce.
+
+The notice records the ban it is about (`ban_kind`, `ban_permanent`, `ban_until`), but whether that
+ban is *still* in force is asked of the account at read time, so a notice never keeps claiming
+somebody is banned after the ban was lifted or ran out - in a thread it says *"no longer in force"*,
+and the single-notice page says the same. That is also why the row is a **snapshot**: the excerpt,
+its post's title and its URL are copied in when the notice is written, so nothing is looked up when
+it is rendered, no message can be used to reach a post the reader was not allowed to see, and the
+text cannot change under the person who received it. Bodies go through the same `linkify` filter as
+every other body of text on the site, so a link is clickable and markup is text.
+
+**An account ban is the one case the inbox cannot serve.** Reading messages needs a session, and an
+account ban is exactly what clears it - so that notice is shown on the sign-in page instead, from
+`notice_for`, the account id left in the freshly cleared (still signed) session by
+`enforce_moderation()`.
+
+### Admins, and the record
+
+Every ban, lifted ban and hand-written message is also written to `moderation_log` (who, what, why,
+which content, and a link to the offending post or comment), which is what the panel's **Moderation
+history** lists newest first. It exists because the columns migration 0009 added to `users` only
+remember the *last* ban; the log remembers all of them, and `latest_ban_causes()` reads the newest
+ban per account out of it, so *"what did they get banned for?"* still has an answer months later.
+
+**Deleting an account leaves its conversations standing.** A thread belongs to both people in it,
+so closing one account must not quietly delete what its owner was told, nor erase the other
+person's half of a chat: the thread stays, reading as `[ Account Deleted ]` with a ✕ avatar, and the
+other person can still read it and write into it. The tombstone cannot sign in, so nothing in it is
+readable to whoever left. The moderation log stays for the same reason, and it stores no message
+bodies.
+
+A message is capped at `MAX_DM_LENGTH` (2,000 characters, the same ceiling as a comment) and the
+timestamp on your own line reads `Sent` until the other person opens the thread, then `Seen`. Every
+read of the new tables is wrapped so a database without `0015_direct_messages.sql` degrades instead
+of failing: the inbox renders with an empty conversation list, an existing thread 404s, starting one
+answers *"Messages are not available right now"*, and the admin panel shows the section with a note
+saying which account to create.
 
 ## Posting, feeds, votes and replies
 
@@ -190,13 +291,53 @@ ships code and never migrations.
 author can edit or delete their own post from the post page. Site owners can additionally
 edit or delete *any* post, keep a post as a draft, and file it into either feed.
 
+**A post lives at `/<account number>/posts/<post id>`** - the account of whoever wrote it,
+then an 11-character post id in the shape Google+ used, from `secrets` in
+`generate_post_public_id()`:
+
+```
+/1/posts/WU4Qec9X6os
+```
+
+A post id is unique on its own, so the leading number does not identify anything: the post is
+looked up by its own id and a read carrying the wrong number (an account id from before a
+migration, somebody else's, or none at all) is **301'd to the right address** instead of being
+served a second time. Ids are random rather than sequential, so a post's age and its neighbours
+cannot be read off its URL.
+
+Two other spellings are still accepted rather than 404ing, and both redirect to the canonical
+address on a read (`post()` and `post_legacy()` in `src/worker.py`):
+
+| Requested | What happens |
+| --- | --- |
+| `/posts/<post id>` | 301 to `/<account number>/posts/<post id>` - the shape handed out between migrations `0012` and `0013`. A post with no author at all (the seeded welcome post) lives here instead, because it has no number to lead with. |
+| `/post/<row id>` | 301 to the canonical address - the original numeric-row-id shape. |
+
+A **write** is never redirected away from on any of the three: the comment is saved first and
+the redirect follows, so a comment typed into a page opened before this change is not lost.
+
+Templates never spell the shape out. `url_for("post_with_author", ...)` is not used; they call
+the `post_url(post)` global with the post row, so the address exists in exactly one place
+(`canonical_post_path()`). That works because every query that feeds a template selects
+`users.user_id AS author_public_id` - a row without it falls back to `/posts/<post id>`.
+
+Accounts carry their own public id: the `users.user_id` shown as **User ID** on the profile and
+settings pages, and the first segment of every post URL its owner writes. It is the account's
+**place in the signup order** - the first account on the site is `1`, the next `2`, and so on
+(`0013_sequential_profile_ids.sql`). Numbers are taken one past the highest in use
+(`next_profile_id()`), so one is never handed to two accounts and never reused after a member
+leaves - which is what keeps a URL stable. Registration retries on the UNIQUE constraint, so two
+signups in the same instant cannot collide. Migration `0012` had reissued these ids as random
+21-digit numbers (the shape `plus.google.com` used); the original 16-character hex token is still
+kept in `users.legacy_user_id`.
+
 **Two feeds.** Every post carries a category, and `/?category=community` or
 `/?category=systematics` filters the feed (the tabs on the home page). Regular accounts can
 only write to **Community posts** - the category is decided from the author's account, so a
 forged `category` form field is ignored (`post_category_for()` in `src/worker.py`). Only
 accounts listed in `OWNER_USERNAMES` land in **Systematics posts**, which stays your channel
 while the community has its own. Draft posts are unlisted: only their author and site owners
-can open `/post/<id>` for them.
+can open a draft at its own URL for them.
 
 The seeded welcome post has no author until an owner account exists, so the first owner to
 register claims it (`register()` in `src/worker.py`), and a database that already has the
@@ -246,6 +387,67 @@ given an `https://` scheme). Two details:
   inserted.
 - The feed shows the first 500 characters of a post, and a URL that runs to that cut is left
   as plain text rather than linked: half a URL is a broken link.
+
+**Link text can replace the address.** Writing `[the words](https://example.com)` makes "the
+words" the link and hides the address, which is how a pasted download URL stops dominating a
+sentence. Only the address goes in the brackets - the visible text is escaped like any other
+user text, so a label containing `<b>` shows those characters rather than markup, and the
+address is used only as the `href`. The form has to start with a scheme or `www.`, which is
+what stops a hand-written `[click](javascript:...)` from becoming an anchor. Nothing else of
+Markdown is implemented. In a feed excerpt that cuts through a bracket link, the label
+survives and the address is dropped, since half an address is not a link.
+
+It is the same `linkify()` filter everywhere, so a comment or a bio can use both spellings
+too.
+
+**The update-log placeholder fills itself in.** Google+ never resolved one of its own
+strings - notification mails went out reading `[DATE] at [LOCAL USER TIME ZONE]`. A post may
+write that phrase, or just `[DATE]`, and `linkify()` replaces it with the post's own date and
+time: `2026-09-19 9:07 pm`. The phrase is matched as a unit, so the "at" between the two
+tokens is not left stranded on its own. A bare `[LOCAL USER TIME ZONE]` still matches and
+renders as nothing, which is what keeps a post written while it printed the zone from showing
+raw brackets. Matching is case-insensitive, and a post with no usable timestamp leaves the
+tokens alone.
+
+The clock is 12-hour rather than the site's 24-hour one, because this is a line of prose
+inside a post. The instant is UTC on the server and `public/static/localtime.js` restates it
+on the reader's own clock, because only the browser knows which zone the reader is in: the
+stamp carries the UTC instant in `data-log-time` and the deferred script rewrites the text.
+**No zone name is printed** - the stamp is unambiguous to the person already reading it.
+Without JavaScript the line still reads correctly, just as UTC, which is how every other date
+on the site is shown, and the `<time datetime>` attribute stays the true UTC instant either
+way.
+
+Substitution runs on the plain runs of text inside `linkify()`, never on a URL, so a link
+like `https://example.com/[DATE]/x` keeps its own address intact.
+
+**The update log can read the repository.** A post that writes `[COMMITS]` gets the newest
+commits from `systematicmidis/systematics-website`, one line each: the commit's own time on the
+reader's clock, then the commit subject. Nothing in the list is a link - it reads as a list of
+changes rather than a list of links, and a commit subject is still escaped like any other user
+text. That is what keeps an update log current without being edited: pushing a commit adds a
+line.
+
+The public GitHub API needs no token, so the Worker holds none; the list is read anonymously,
+cached in `commit_log` (migration `0011`) and re-read at most once per `COMMIT_LOG_TTL_SECONDS`
+(5 minutes), because the unauthenticated API allows 60 requests an hour per IP address and a
+Worker's egress addresses are shared with every other Worker. Facts worth knowing:
+
+- The refresh happens when a post containing `[COMMITS]` is rendered, so the log is current
+  within the interval rather than instantly. **Settings -> Refresh the commit log** (owner only)
+  re-reads it on the spot. Set the Worker variable `COMMIT_LOG_REPO` to point at another
+  repository.
+- The attempt is recorded *before* the request goes out, and a failed one is not retried for
+  `COMMIT_LOG_RETRY_SECONDS` (15 minutes). So a rate-limited or unreachable GitHub is asked once,
+  and the cached list is kept and still rendered - a post never shows an error in place of the
+  list, and never replaces a good list with nothing.
+- A feed card shows only the newest commit (`COMMIT_LOG_EXCERPT_LIMIT`); the whole list belongs on
+  the post.
+- Only the subject line of a commit message is stored, truncated to `COMMIT_LOG_MESSAGE_LIMIT`
+  characters, and every line is escaped - a commit message is somebody else's text. No address
+  is stored at all: the cached row holds the commit id, and `COMMIT_SHA_RE` holds both GitHub's
+  response and the cached row to that shape, so a row written into the cache by anything else
+  is dropped instead of printed.
 
 ## Mobile layout
 
@@ -485,9 +687,10 @@ not database migrations.
   `REMEMBER_SESSION_DAYS` (30) days. The tick is not remembered across sign-ins -
   `session.clear()` discards it before the new choice is applied - but it stays ticked if
   the password was wrong, so a retry does not silently drop it.
-- **Posts are addressed by id**: `/post/3`, not `/post/some-slug`. The `slug` column was
-dropped in `0003_posts_use_ids.sql`, so old slug URLs now 404. The post editor no longer
-  asks for a slug.
+- **Posts are addressed by id**: `/<account number>/posts/<post id>`, not `/post/some-slug`. The
+  `slug` column was dropped in `0003_posts_use_ids.sql`, so old slug URLs now 404; `/posts/<post id>`
+  and `/post/<row id>` redirect to the canonical shape, and a wrong account number in front of a
+  post id is corrected with a 301 rather than 404ing. The post editor no longer asks for a slug.
 - **Bios are optional** and capped at `MAX_BIO_LENGTH` (500 characters) in `src/worker.py`.
   They are edited at `/settings/profile` and shown on the public profile page.
 - **Profile banners are optional** (`users.banner`, added in `0004_add_user_banner.sql`).
@@ -564,7 +767,7 @@ What was measured on this project (local `pywrangler dev`, wall time per request
 
 | Request (local `pywrangler dev`) | Cost |
 | --- | --- |
-| Page render (`/`, `/post/1`) | ~15-25 ms |
+| Page render (`/`, `/<account number>/posts/<post id>`) | ~15-25 ms |
 | Sign-up with no image | ~86 ms |
 | Sign-up with a 10 KB / 100 KB image | ~83 ms / ~103 ms |
 | Sign-up with a 400 KB / 1.6 MB image | ~181 ms / ~1.46 s |

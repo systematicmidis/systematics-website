@@ -30,7 +30,7 @@
       </small>
     </div>
     <div class="actions">
-      <a href="{{ url_for('post', post_id=item.id) }}">View</a>
+      <a href="{{ post_url(item) }}">View</a>
       <a href="{{ url_for('edit_post', post_id=item.id) }}">Edit</a>
       <form method="post" action="{{ url_for('delete_post', post_id=item.id) }}" onsubmit="return confirm('Delete this post and its comments?')">
         <button class="danger" type="submit">Delete</button>
@@ -80,6 +80,18 @@
           {% if person.ban_reason %}
             <small class="ban-reason-note">Reason: {{ person.ban_reason }}{% if person.banned_by %} · by {{ person.banned_by }}{% endif %}{% if person.banned_at %} · {{ person.banned_at }} UTC{% endif %}</small>
           {% endif %}
+          {# What the ban was applied for. The reason above is the admin's wording;
+             this is the post or comment they attached to it, kept in the
+             moderation log so it still answers the question after the comment
+             itself has been deleted. #}
+          {% set cause = causes.get(person.id) %}
+          {% if cause and cause.content_id %}
+            <small class="ban-cause">
+              Because of their {{ cause.content_kind }} on “{{ cause.content_title }}”
+              {%- if cause.content_excerpt %}: “{{ cause.content_excerpt }}”{% endif %}
+              {%- if cause.content_url %} · <a href="{{ cause.content_url }}">view</a>{% endif %}
+            </small>
+          {% endif %}
         {% endif %}
       </div>
       {% if person.deleted_at %}
@@ -105,6 +117,14 @@
                 {% endfor %}
               </select>
             </label>
+            <label class="ban-field">Because of
+              <select class="content-picker" name="content">
+                <option value="">(not specified)</option>
+                {% for choice in content_by_user.get(person.id, []) %}
+                  <option value="{{ choice.value }}">{{ choice.label }}</option>
+                {% endfor %}
+              </select>
+            </label>
             <input class="ban-reason" name="reason" maxlength="200" placeholder="Reason (optional)">
             <button type="submit">Apply ban</button>
           </form>
@@ -113,6 +133,26 @@
               <button class="clear-ban" type="submit">Lift bans</button>
             </form>
           {% endif %}
+          {# Writing into somebody's inbox by hand, separate from the ban form on
+             purpose. It is sent as the site's own account, so it lands in the same
+             conversation as that account's notices and can be answered there.
+             Folded away so the account list stays scannable. #}
+          <details class="admin-message">
+            <summary>Message {{ person.display_name }} as the site</summary>
+            <form method="post" action="{{ url_for('admin_message_user', user_id=person.id) }}">
+              <textarea name="body" rows="4" maxlength="{{ MAX_DM_LENGTH }}" required
+                        placeholder="Write to {{ person.display_name }}…"></textarea>
+              <label class="ban-field">About
+                <select name="content">
+                  <option value="">(not specified)</option>
+                  {% for choice in content_by_user.get(person.id, []) %}
+                    <option value="{{ choice.value }}">{{ choice.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <button type="submit">Send</button>
+            </form>
+          </details>
         </div>
       {% endif %}
     </div>
@@ -136,4 +176,85 @@
     <p class="muted">No comments yet.</p>
   {% endfor %}
 </section>
+
+{# The site's own inbox ---------------------------------------------------------
+   Every conversation the moderation account is in: each notice the site has sent,
+   and whatever the person wrote back. It is read and answered from here because
+   that account has no session of its own - opening a thread marks the site's side
+   of it read, and the Message boxes above write into the same conversation. #}
+<section id="moderation" class="admin-comments">
+  <div class="section-heading"><h2>Site messages</h2><span>{{ moderation_threads|length }}</span></div>
+  <p class="muted">
+    {% if moderation %}
+      Conversations held by <strong>{{ moderation.display_name }}</strong>
+      (@{{ moderation.username }}). It is the account ban notices are sent as and
+      the one the Message boxes above write as, so replies to either arrive here.
+    {% else %}
+      There is no <code>{{ MODERATION_USERNAME_DEFAULT }}</code> account, so the site
+      has no voice to write notices as: bans and messages are still recorded, but as
+      unthreaded notices rather than conversations. Create that account, then have a
+      second look here.
+    {% endif %}
+  </p>
+  {% for item in moderation_threads %}
+    <div class="admin-row">
+      <div class="account-main">
+        <strong>
+          <a href="{{ url_for('conversation', conversation_id=item.conversation.id) }}">{{ item.other.display_name }}</a>
+          {% if item.unread %}<span class="badge badge-new">{{ item.unread }} unread</span>{% endif %}
+        </strong>
+        <small>@{{ item.other.username }} · {{ item.total }} message{% if item.total != 1 %}s{% endif %}
+          · last {{ (item.last_at or item.conversation.created_at or '')[:16] }} UTC</small>
+        <p class="muted">{{ item.last_body|message_preview }}</p>
+      </div>
+      <div class="actions">
+        <a href="{{ url_for('conversation', conversation_id=item.conversation.id) }}">Open</a>
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">Nothing has been sent yet.</p>
+  {% endfor %}
+</section>
+
+{# The record behind the badges -------------------------------------------------
+   Every ban, lifted ban and admin message is logged, together with the post or
+   comment it was about. Bans handed out before this log existed are not here -
+   the account row above still shows their reason - but nothing from now on is
+   only in somebody's memory. #}
+<section id="moderation-history" class="admin-comments">
+  <div class="section-heading"><h2>Moderation history</h2><span>{{ history|length }}</span></div>
+  <p class="muted">
+    Newest first. “Because of” names the post or comment that was attached to the
+    ban when it was applied, copied in full so the entry still explains itself if
+    that comment is later deleted.
+  </p>
+  {% for entry in history %}
+  <div class="admin-row">
+    <div>
+      <strong>
+        {{ entry.action|capitalize }}
+        {%- if entry.ban_kind %} · {{ entry.ban_kind }} ban{% endif %}
+        {{- ' · permanent' if entry.permanent else '' }}
+        {%- if entry.until %} · until {{ entry.until }} UTC{% endif %}
+      </strong>
+      <small>
+        {{ entry.display_name or entry.username or 'a deleted account' }}
+        {%- if entry.username %} @{{ entry.username }}{% endif %}
+        · by {{ entry.acted_by or 'admin' }} · {{ entry.created_at }} UTC
+      </small>
+      {% if entry.reason %}<p class="muted">Reason: “{{ entry.reason }}”</p>{% endif %}
+      {% if entry.content_id %}
+        <p class="muted">
+          Because of their {{ entry.content_kind }} on “{{ entry.content_title }}”:
+          {% if entry.content_excerpt %}“{{ entry.content_excerpt }}”{% endif %}
+          {% if entry.content_url %}· <a href="{{ entry.content_url }}">view</a>{% endif %}
+        </p>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+    <p class="muted">Nothing has been moderated yet.</p>
+  {% endfor %}
+</section>
+
 {% endblock %}

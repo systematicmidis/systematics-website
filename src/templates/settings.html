@@ -70,7 +70,11 @@
               {%- endif %}</li>
           {% endfor %}
         </ul>
-        <p class="muted">Bans are applied by the site admins.</p>
+        {# The banner on every page says what is restricted; the inbox holds the
+           notice that explains what it was for. #}
+        <p class="muted">Bans are applied by the site admins.
+          <a href="{{ url_for('messages') }}">Read your messages</a>{% if unread_messages %}
+          ({{ unread_messages }} unread){% endif %} for the notice behind each one.</p>
       </div>
     {% endif %}
 
@@ -150,6 +154,12 @@
     <small>Re-reads the page behind every post that contains a link, up to
       {{ max_link_refresh }} per run. The admin panel does the same thing.</small>
   </form>
+  <form class="owner-action" method="post" action="{{ url_for('settings_refresh_commits') }}">
+    <button type="submit">Refresh the commit log</button>
+    <small>Re-reads <code>{{ commit_repo }}</code> from GitHub for the posts that use
+      <code>[COMMITS]</code>. Those posts also refresh themselves every
+      {{ commit_ttl_minutes }} minutes.</small>
+  </form>
 
   <h3 class="owner-subhead">Configuration in effect</h3>
   <dl class="owner-facts">
@@ -165,7 +175,7 @@
       {% for item in drafts %}
         <div class="owner-row">
           <div class="owner-row-main">
-            <a href="{{ url_for('post', post_id=item.id) }}">{{ item.title }}</a>
+            <a href="{{ post_url(item) }}">{{ item.title }}</a>
             <small>
               {{ item.status }} · {{ item.category }} · {{ (item.created_at or '')[:16] }}
               {% if item.author_username %} · @{{ item.author_username }}{% endif %}

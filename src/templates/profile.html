@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% from "_widgets.html" import avatar, follow_button, person_row, post_card,
-  social_strip, social_list with context %}
+{% from "_widgets.html" import avatar, follow_button, message_button, person_row,
+  post_card, social_strip, social_list with context %}
 {% block title %}{{ user.display_name }} · Systematics Black Midi site{% endblock %}
 {% block content %}
 {# Google+-style header: cover, avatar, name, tagline, follower counts and the
@@ -27,6 +27,7 @@
           <a class="button" href="{{ url_for('profile_settings') }}">Edit profile</a>
         {% else %}
           {{ follow_button(user, is_following, url_for('profile', username=user.username)) }}
+          {{ message_button(user, url_for('profile', username=user.username)) }}
         {% endif %}
       </div>
     </div>
@@ -110,7 +111,7 @@
 {% for comment in comments %}
 <div class="profile-comment">
   <p>{{ comment.content|linkify }}</p>
-  <span>on <a href="{{ url_for('post', post_id=comment.post_id) }}">{{ comment.title }}</a> · {{ comment.created_at }}</span>
+  <span>on <a href="{{ post_url(comment) }}">{{ comment.title }}</a> · {{ comment.created_at }}</span>
 </div>
 {% else %}
 <p class="muted">No comments yet.</p>

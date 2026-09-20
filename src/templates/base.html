@@ -32,6 +32,10 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&amp;display=swap">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js" defer></script>
+  {# Deferred like theme.js above: it only rewrites the update-log timestamps
+     once the page is parsed, and every one of them already reads as plain UTC
+     text if it never runs. #}
+  <script src="/static/localtime.js" defer></script>
 </head>
 <body>
 {# Google+ kept every link in a rail against the left edge of the window and put
@@ -63,6 +67,9 @@
       {% if current_user %}
         <a class="rail-link{% if request.path == url_for('profile', username=current_user.username) %} is-active{% endif %}" href="{{ url_for('profile', username=current_user.username) }}"><span class="rail-icon" aria-hidden="true">●</span>{{ current_user.display_name }}{% if is_owner %} <span class="owner-tag">owner</span>{% endif %}</a>
         <a class="rail-link{% if request.path == url_for('followers', username=current_user.username) %} is-active{% endif %}" href="{{ url_for('followers', username=current_user.username) }}"><span class="rail-icon" aria-hidden="true">◍</span>My followers</a>
+        {# The count is the point of the badge: a moderation notice should not sit
+           unread because nobody thought to open the inbox. #}
+        <a class="rail-link{% if request.path.startswith('/messages') %} is-active{% endif %}" href="{{ url_for('messages') }}"><span class="rail-icon" aria-hidden="true">✉</span>Messages{% if unread_messages %} <span class="rail-badge">{{ unread_messages }}</span>{% endif %}</a>
         <a class="rail-link{% if request.path == url_for('profile_settings') %} is-active{% endif %}" href="{{ url_for('profile_settings') }}"><span class="rail-icon" aria-hidden="true">✱</span>Edit profile</a>
       {% else %}
         <a class="rail-link{% if request.path == url_for('login') %} is-active{% endif %}" href="{{ url_for('login') }}"><span class="rail-icon" aria-hidden="true">→</span>Sign in</a>
@@ -111,7 +118,10 @@
             <li>{{ ban_message(kind, info) }}</li>
           {% endfor %}
         </ul>
-        <a href="{{ url_for('settings') }}">Account settings</a>
+        {# The banner says what is restricted; the inbox says what it was for, so
+           it is linked from here rather than left to be found. #}
+        <a href="{{ url_for('messages') }}">Read the notice{% if unread_messages %} ({{ unread_messages }} unread){% endif %}</a>
+        · <a href="{{ url_for('settings') }}">Account settings</a>
       </div>
     {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}

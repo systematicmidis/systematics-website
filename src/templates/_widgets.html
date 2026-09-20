@@ -62,6 +62,19 @@
   {%- endif -%}
 {%- endmacro %}
 
+{# Message, the Hangouts control that sat beside Follow: it opens the thread with
+   this person, writing nothing until the first line is actually sent. Your own
+   profile gets no button, a deleted account has nobody left to write to, and a
+   signed-out visitor is sent to sign in first. #}
+{% macro message_button(person, next_url='') -%}
+  {%- if current_user and current_user.id == person.id -%}
+  {%- elif current_user and not person.deleted_at -%}
+    <a class="message-button" href="{{ url_for('new_conversation', username=person.username) }}">Message</a>
+  {%- elif not current_user -%}
+    <a class="message-button" href="{{ url_for('login', next=next_url or request.path) }}">Message</a>
+  {%- endif -%}
+{%- endmacro %}
+
 {# Social links, in two shapes. Both are built from social_links_of(), so every
    url is already an http(s) address by the time it gets here - and both carry
    rel="nofollow", because a profile should not be a place to buy link juice. #}
@@ -130,10 +143,10 @@
     {% endif %}
   </div>
   <div class="post-body">
-    <h2><a href="{{ url_for('post', post_id=post.id) }}">{{ post.title }}</a></h2>
-    <p>{{ post.content|linkify(500) }}{% if post.content|length > 500 %}…{% endif %}</p>
+    <h2><a href="{{ post_url(post) }}">{{ post.title }}</a></h2>
+    <p>{{ post.content|linkify(500, created_at=post.created_at) }}{% if post.content|length > 500 %}…{% endif %}</p>
     {{ link_card(post, compact=true) }}
-    {% if post.content|length > 500 %}<a class="post-link" href="{{ url_for('post', post_id=post.id) }}">Read more</a>{% endif %}
+    {% if post.content|length > 500 %}<a class="post-link" href="{{ post_url(post) }}">Read more</a>{% endif %}
   </div>
   {{ vote_bar(post) }}
 </article>
@@ -157,9 +170,9 @@
               type="submit" title="Dislike">▼</button>
     </form>
   {% else %}
-    <a class="vote signin" href="{{ url_for('login', next=url_for('post', post_id=post.id)) }}">Sign in to vote</a>
+    <a class="vote signin" href="{{ url_for('login', next=post_url(post)) }}">Sign in to vote</a>
   {% endif %}
-  <a class="comment-link" href="{{ url_for('post', post_id=post.id) }}#comments">💬
+  <a class="comment-link" href="{{ post_url(post) }}#comments">💬
     {{ post.comment_count }} comment{% if post.comment_count != 1 %}s{% endif %}</a>
 </div>
 {%- endmacro %}

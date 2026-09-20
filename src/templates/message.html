@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}{{ message.subject }} · Messages · Systematics Black Midi site{% endblock %}
+{% block content %}
+<p class="back-link"><a href="{{ url_for('messages') }}">← All messages</a></p>
+
+{# One message, as its recipient sees it. The body is plain text written by the
+   bot or by an admin, so it is escaped and then linkified - the same filter every
+   other body of text on the site goes through - and it keeps its own line breaks
+   (see .message-body in style.css), because a notice is written in paragraphs. #}
+<article class="message">
+  <header class="message-head">
+    {% if message.sender_id %}
+      <span class="avatar">{{ message.sender_label|name_initial }}</span>
+    {% else %}
+      <span class="avatar bot-avatar" aria-hidden="true">✦</span>
+    {% endif %}
+    <div class="message-head-text">
+      <h1>{{ message.subject }}</h1>
+      <small>
+        {{ message.sender_label }}
+        {%- if not message.sender_id %} · automatic{% endif %}
+        · {{ message.created_at }} UTC
+      </small>
+    </div>
+  </header>
+
+  <div class="message-body">{{ message.body|linkify }}</div>
+
+  {% if message.about_id %}
+    {# The post or comment the moderation was about. It is a snapshot taken when
+       the ban was applied, so it still reads correctly after the row itself has
+       been edited or deleted - and the link goes to the post as it is now. #}
+    <div class="message-about">
+      <span class="message-about-label">
+        {{ 'Comment' if message.about_kind == 'comment' else 'Post' }} this was about
+      </span>
+      {% if message.about_excerpt %}<blockquote>{{ message.about_excerpt }}</blockquote>{% endif %}
+      {% if message.about_url %}
+        <a class="message-about-link" href="{{ message.about_url }}">
+          {{ message.about_title or 'Open it' }}
+        </a>
+      {% else %}
+        <strong>{{ message.about_title }}</strong>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if message.ban_kind %}
+    {# A notice is a record of a decision, so it says what was decided and - when
+       the ban has since run out or been lifted - that it no longer applies. The
+       ban's own state is asked of the account, not guessed from the message. #}
+    <div class="message-ban">
+      <span class="badge badge-ban">{{ 'Ban in force' if ban_live else 'No longer in force' }}</span>
+      {% if ban_live %}
+        {{ ban_message(message.ban_kind, {'permanent': message.ban_permanent,
+                                          'until': message.ban_until}) }}
+      {% else %}
+        Recorded as a {{ message.ban_kind }} ban{% if message.ban_permanent %}
+        (permanent){% else %} until {{ message.ban_until }} UTC{% endif %}, which has
+        since ended.
+      {% endif %}
+    </div>
+  {% endif %}
+
+  <div class="message-tools">
+    <form method="post" action="{{ url_for('delete_message', message_id=message.id) }}"
+          onsubmit="return confirm('Delete this message?')">
+      <button class="danger" type="submit">Delete</button>
+    </form>
+  </div>
+</article>
+{% endblock %}

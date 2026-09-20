@@ -214,6 +214,16 @@ footer { margin-top:auto; }
 .post-content { font-size:15px; }
 .post-link { display:inline-block; margin-top:8px; }
 
+/* The commit log a post's [COMMITS] token fills in: one line per commit. No
+   bullets and no indent, because each line is a sentence in the post - the
+   timestamp is already the visual marker. It keeps the post's own line height,
+   and its text wraps like any other line, so nothing here can widen the column
+   on a phone. Nothing in a line is a link, so the commit subject keeps the
+   post's own ink and the stamp is the quieter half of the line. */
+.commit-log { list-style:none; margin:0; padding:0; }
+.commit-log li { margin:0; }
+.commit-log .log-time { color:rgba(0,0,0,0.54); }
+
 .post-actions {
   display:flex;
   gap:26px;
@@ -858,6 +868,173 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
   .ban-field, .ban-field select, .ban-reason { flex:1 1 auto; width:auto; }
 }
 
+/* Messages: the inbox list and one message -----------------------------------
+   Written against the :root tokens only, so the dark theme at the foot of this
+   file themes all of it without a rule of its own - the same rule the settings
+   page follows. */
+.rail-badge {
+  margin-left:auto; min-width:18px; padding:1px 6px; border-radius:9px;
+  background:var(--accent); color:var(--on-accent);
+  font-size:11px; font-weight:500; line-height:16px; text-align:center;
+}
+.messages-header { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; }
+.messages-tools { margin:0 0 12px; text-align:right; }
+.messages-tools button { margin-top:0; padding:6px 12px; font-size:12px; }
+.message-list { background:var(--card); border:1px solid var(--line); border-bottom:0; }
+.message-row {
+  display:flex; gap:12px; padding:12px 14px;
+  border-bottom:1px solid var(--line); color:var(--text);
+}
+.message-row:hover { background:var(--surface-3); text-decoration:none; }
+/* An unread row gets both a tint and a red rule: a badge alone is easy to miss
+   while scanning a long list. */
+.message-row.is-unread { background:var(--surface-2); box-shadow:inset 3px 0 0 var(--accent); }
+.message-who { flex:0 0 auto; }
+.bot-avatar { background:var(--link-soft); color:var(--link); }
+.message-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.message-top { display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
+/* The row is an <a>, and the dark theme colours links blue, so the ink of the
+   subject is named here rather than inherited - a subject is not a link. */
+.message-top strong { font-weight:500; color:var(--text); }
+.message-snippet { color:var(--text-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.message-from { color:var(--text-dim); font-size:12px; }
+.message-when { flex:0 0 auto; color:var(--text-dim); font-size:12px; white-space:nowrap; }
+.badge-new { background:var(--accent); color:var(--on-accent); }
+
+.back-link { margin:0 0 10px; font-size:13px; }
+.message { background:var(--card); border:1px solid var(--line); padding:20px 22px; }
+.message-head {
+  display:flex; gap:12px; align-items:flex-start;
+  border-bottom:1px solid var(--border-soft); padding-bottom:12px; margin-bottom:14px;
+}
+.message-head h1 { margin:0 0 3px; font-size:20px; font-weight:400; }
+.message-head small { color:var(--text-dim); }
+/* A notice is written in paragraphs, so its own line breaks are kept. */
+.message-body { white-space:pre-wrap; color:var(--text-soft); line-height:22px; max-width:660px; }
+.message-about {
+  margin-top:16px; padding:12px 14px; border:1px solid var(--line);
+  border-left:4px solid var(--accent); border-radius:3px; background:var(--surface-2);
+}
+.message-about-label {
+  display:block; font-size:12px; text-transform:uppercase; letter-spacing:.6px;
+  color:var(--text-dim);
+}
+.message-about blockquote {
+  margin:8px 0; padding-left:12px; border-left:2px solid var(--line); color:var(--text-soft);
+}
+.message-about-link { display:inline-block; margin-top:4px; font-weight:500; }
+.message-ban {
+  margin-top:14px; padding:10px 12px; border:1px solid var(--line);
+  border-radius:3px; background:var(--accent-soft); color:var(--text-soft);
+}
+.message-tools { margin-top:18px; padding-top:14px; border-top:1px solid var(--border-soft); }
+/* The same notice, shown under the sign-in card: it is framed by the red rule so
+   it reads as the reason the sign-in was refused rather than as page furniture. */
+.ban-notice-message { margin-top:14px; border-top:4px solid var(--accent); }
+.message-tools button { margin:0; }
+
+@media (max-width: 560px) {
+  /* The timestamp drops under the subject rather than squeezing the snippet. */
+  .message-row { flex-wrap:wrap; }
+  .message-when { width:100%; padding-left:52px; }
+  .messages-header { display:block; }
+}
+
+/* Conversations: the inbox row and the thread ---------------------------------
+   Hangouts put the conversation itself in the page and the people in bubbles -
+   yours tinted and pushed right, theirs flat on the left. Everything here is
+   written against the :root tokens, so the dark theme themes all of it. */
+.messages-new { display:flex; gap:8px; margin:0 0 12px; }
+.messages-new input {
+  flex:1; min-width:0; padding:8px 10px; font:inherit;
+  border:1px solid var(--line); border-radius:3px;
+  background:var(--field); color:var(--text);
+}
+.messages-new button { margin:0; }
+.notices-heading { margin-top:18px; }
+.snippet-prefix { color:var(--text-dim); }
+
+.convo-head {
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  background:var(--card); border:1px solid var(--line); border-bottom:0;
+  padding:12px 16px;
+}
+.convo-who { display:flex; align-items:center; gap:11px; min-width:0; color:inherit; }
+.convo-who:hover { text-decoration:none; }
+.convo-who-text { display:flex; flex-direction:column; min-width:0; }
+.convo-who-text strong { font-weight:500; color:var(--text); }
+.convo-who-text small { color:var(--text-dim); }
+.convo-back { font-size:12px; white-space:nowrap; }
+/* An admin reading the site's own thread is told whose voice the box below is. */
+.convo-standing-in {
+  margin:0; padding:9px 16px; font-size:13px;
+  background:var(--accent-soft); border:1px solid var(--line); border-bottom:0;
+  color:var(--text-soft);
+}
+
+.convo-stream {
+  list-style:none; margin:0; padding:16px;
+  background:var(--card); border:1px solid var(--line);
+  display:flex; flex-direction:column; gap:6px;
+  max-height:62vh; overflow-y:auto;
+}
+.convo-bubble { display:flex; }
+.convo-bubble.is-mine { justify-content:flex-end; }
+.bubble {
+  max-width:min(540px, 78%);
+  padding:8px 12px 6px;
+  border:1px solid var(--line); border-radius:14px;
+  background:var(--surface-2); color:var(--text-soft);
+}
+/* Your own side of the conversation, tinted the way a chat tints yours. */
+.convo-bubble.is-mine .bubble { background:var(--link-soft); border-color:transparent; }
+.bubble-subject { margin:0 0 4px; font-weight:500; color:var(--text); }
+.bubble-body { white-space:pre-wrap; }
+.bubble-tag { margin-bottom:5px; }
+.bubble-meta {
+  display:flex; gap:8px; justify-content:flex-end;
+  margin-top:3px; font-size:11px; color:var(--text-dim);
+}
+.bubble-ban { margin:8px 0 0; font-size:12px; color:var(--text-dim); }
+.convo-empty { margin:0; }
+.convo-compose {
+  display:flex; gap:8px; padding:12px 16px;
+  background:var(--card); border:1px solid var(--line); border-top:0;
+}
+.convo-compose textarea {
+  flex:1; min-width:0; padding:8px 10px; font:inherit; resize:vertical;
+  border:1px solid var(--line); border-radius:3px;
+  background:var(--field); color:var(--text);
+}
+.convo-compose button { margin:0; align-self:flex-end; }
+
+/* The Message control that sits beside Follow, the way Hangouts did. */
+.message-button {
+  display:inline-block; margin-left:6px; padding:8px 14px;
+  border:1px solid var(--line); border-radius:2px; background:var(--card);
+  color:var(--text); font-size:13px; font-weight:500;
+}
+.message-button:hover { background:var(--surface-3); text-decoration:none; }
+
+@media (max-width: 560px) {
+  .bubble { max-width:88%; }
+  .convo-head { flex-wrap:wrap; }
+  .messages-new { flex-wrap:wrap; }
+}
+
+/* Admin: the cause picker, the compose box and the moderation log ------------ */
+.ban-cause { display:block; margin-top:6px; color:var(--text-dim); }
+.ban-cause a { color:var(--link); }
+.content-picker { max-width:230px; }
+.admin-message { width:100%; max-width:430px; }
+.admin-message summary { cursor:pointer; font-size:12px; color:var(--link); padding:3px 0; }
+.admin-message form { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+.admin-message input, .admin-message textarea, .admin-message select {
+  width:100%; max-width:none; padding:6px 7px; font:inherit; font-size:12px;
+}
+.admin-message textarea { resize:vertical; }
+.admin-message button { margin:0; align-self:flex-start; padding:6px 12px; font-size:12px; }
+
 /* Dark theme ------------------------------------------------------------------
    The theme is a ``data-theme="dark"`` attribute on <html>, set before the first
    paint by the inline script in base.html and changed by public/static/theme.js.
@@ -886,6 +1063,12 @@ html[data-theme="dark"] {
   --shadow: 0 1px 3px rgba(0,0,0,.55);
 }
 html[data-theme="dark"] a { color:var(--link); }
+/* The dark avatar rule below is `html[data-theme="dark"] .avatar`, which ties
+   with a plain `.bot-avatar` override and beats it on source order, so the site
+   bot's tint is restated with a class more specific than that one or every
+   message would look like it came from a person. */
+html[data-theme="dark"] .avatar.bot-avatar,
+html[data-theme="dark"] .small-avatar.bot-avatar { background:var(--link-soft); color:var(--link); }
 
 /* Chrome: the rail. On a desktop it has no background of its own, so the page
    shows through it - the strip background is only for the phone layout, where
@@ -919,6 +1102,7 @@ html[data-theme="dark"] .post-body h1,
 html[data-theme="dark"] .post-body h2 { color:var(--text); }
 html[data-theme="dark"] .post-body p,
 html[data-theme="dark"] .post-content { color:var(--text-soft); }
+html[data-theme="dark"] .commit-log .log-time { color:var(--text-dim); }
 html[data-theme="dark"] .post-actions { border-color:#23272f; color:var(--muted); }
 html[data-theme="dark"] .comments h3 { color:var(--muted); }
 html[data-theme="dark"] .comment { border-top-color:#23272f; }

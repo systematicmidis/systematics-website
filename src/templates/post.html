@@ -64,7 +64,7 @@
   </div>
   <div class="post-body">
     <h1>{{ post.title }}</h1>
-    <div class="post-content">{{ post.content|linkify }}</div>
+    <div class="post-content">{{ post.content|linkify(created_at=post.created_at) }}</div>
     {{ link_card(post) }}
   </div>
   {{ vote_bar(post) }}
@@ -92,7 +92,7 @@
       {% endif %}
     {% else %}
       <div class="login-to-comment">
-        <a href="{{ url_for('login', next=url_for('post', post_id=post.id) + '#comments') }}">Sign in</a>
+        <a href="{{ url_for('login', next=post_url(post) + '#comments') }}">Sign in</a>
         or <a href="{{ url_for('register') }}">create an account</a> to comment.
       </div>
     {% endif %}

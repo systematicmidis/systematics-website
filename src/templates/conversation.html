@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}{{ heading.display_name }} · Messages · Systematics Black Midi site{% endblock %}
+{% block content %}
+{# One conversation, oldest message first, the way a chat reads: your own lines on
+   the right, theirs on the left. The same template serves a thread that does not
+   exist yet (opened from a profile or the inbox box), where `conversation` is none
+   and the first message sent is what creates it.
+
+   A notice from the site is an ordinary message in here - it is one from the
+   moderation account - so it arrives as a bubble like any other, carrying the post
+   or comment it is about when there is one. #}
+{% set other = heading %}
+
+<header class="convo-head">
+  <a class="convo-who" href="{% if other.deleted_at %}#{% else %}{{ url_for('profile', username=other.username) }}{% endif %}">
+    {% if other.profile_picture %}
+      <img class="avatar avatar-img" src="{{ url_for('uploads', filename=other.profile_picture) }}" alt="">
+    {% else %}
+      <span class="avatar{% if other.id == moderation_id %} bot-avatar{% endif %}"
+            aria-hidden="true">{{ other.display_name|name_initial }}</span>
+    {% endif %}
+    <span class="convo-who-text">
+      <strong>{{ other.display_name }}</strong>
+      <small>
+        {%- if other.deleted_at %}account deleted
+        {%- elif other.id == moderation_id %}the site's own account · notices arrive here
+        {%- else %}@{{ other.username }}{% endif %}
+      </small>
+    </span>
+  </a>
+  <a class="convo-back" href="{{ url_for('messages') }}">← All messages</a>
+</header>
+
+{% if standing_in %}
+  {# An admin reading the site's thread. Writing below goes out as that account,
+     which is exactly the point - somebody has to be able to answer as it. #}
+  <p class="convo-standing-in">
+    This is the site's conversation, not one of your own. Anything you send below
+    goes out as <strong>{{ moderation.display_name if moderation else MODERATION_USERNAME_DEFAULT }}</strong>.
+  </p>
+{% endif %}
+
+<ol class="convo-stream">
+  {% for item in thread_messages %}
+    {% set is_mine = item.sender_id == my_side_id %}
+    <li class="convo-bubble{% if is_mine %} is-mine{% endif %}" id="message-{{ item.id }}">
+      <div class="bubble">
+        {% if item.kind in ('ban', 'unban') %}
+          <span class="badge badge-ban bubble-tag">
+            {{ 'Notice' if item.kind == 'ban' else 'Notice lifted' }}
+          </span>
+        {% endif %}
+        {# A notice has a headline ("You have been banned from commenting"); a chat
+           message has none, which is what keeps the bubble plain when you type at
+           a friend. #}
+        {% if item.subject %}<p class="bubble-subject">{{ item.subject }}</p>{% endif %}
+        <div class="bubble-body">{{ item.body|linkify }}</div>
+
+        {% if item.about_id %}
+          {# The post or comment a notice is about, as it was when the notice was
+             written: a snapshot, so it still reads correctly after the row itself
+             has been edited or deleted. #}
+          <div class="message-about">
+            <span class="message-about-label">
+              {{ 'Comment' if item.about_kind == 'comment' else 'Post' }} this was about
+            </span>
+            {% if item.about_excerpt %}<blockquote>{{ item.about_excerpt }}</blockquote>{% endif %}
+            {% if item.about_url %}
+              <a class="message-about-link" href="{{ item.about_url }}">{{ item.about_title or 'Open it' }}</a>
+            {% else %}
+              <strong>{{ item.about_title }}</strong>
+            {% endif %}
+          </div>
+        {% endif %}
+
+        {% if item.ban_kind %}
+          {# Whether that ban is still in force is asked of the account now, not
+             baked into the notice, so an old one cannot keep claiming somebody is
+             banned after it ran out. #}
+          <p class="bubble-ban{% if not ban_states.get(item.id) %} is-past{% endif %}">
+            {%- if ban_states.get(item.id) %}This {{ item.ban_kind }} ban is in force{% if item.ban_until %} until {{ item.ban_until }} UTC{% endif %}.
+            {%- else %}The {{ item.ban_kind }} ban this records is no longer in force.
+            {%- endif %}
+          </p>
+        {% endif %}
+
+        <div class="bubble-meta">
+          <span class="bubble-time">{{ (item.created_at or '')[:16] }}</span>
+          {% if is_mine %}
+            {# Hangouts said "Seen"; it is the other person's read mark, so a
+               message they have opened says so. #}
+            <span class="bubble-seen">{% if item.read_at %}Seen{% else %}Sent{% endif %}</span>
+          {% endif %}
+        </div>
+      </div>
+    </li>
+  {% else %}
+    <li class="convo-empty muted">No messages yet - write the first one below.</li>
+  {% endfor %}
+</ol>
+<div id="bottom"></div>
+
+{% if can_post %}
+  <form class="convo-compose" method="post" action="{{ request.path }}">
+    <textarea name="body" rows="2" maxlength="{{ MAX_DM_LENGTH }}" required
+              placeholder="Message {{ other.display_name }}…"
+              aria-label="Message {{ other.display_name }}"></textarea>
+    <button type="submit">Send</button>
+  </form>
+{% else %}
+  <p class="muted">This is somebody else's conversation, so there is nothing to type here.</p>
+{% endif %}
+{% endblock %}
