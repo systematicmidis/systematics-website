@@ -530,6 +530,17 @@ def login_required(f):
         if not session.get("user_db_id"):
             flash("You need to be logged in to do that.", "error")
             return redirect(url_for("login", next=request.path))
+        # The cookie is checked against the database, not just for its presence.
+        # A session can outlive the row it names - a database restored from a
+        # backup, a local one reset, a row removed by hand in D1 - and every
+        # signed-in page indexes the account's own row, so a stale session used
+        # to raise its way through the page. In front of a Cloudflare Worker
+        # that is an error 1101 for whoever is reading, so the cookie is dropped
+        # and the visitor is asked to sign in instead.
+        if not current_user():
+            session.clear()
+            flash("That account no longer exists. Sign in, or create a new one.", "error")
+            return redirect(url_for("login", next=request.path))
         return f(*args, **kwargs)
     return wrapper
 
@@ -894,8 +905,18 @@ UNBAN_NOTES = {
 
 
 def message_preview(body):
-    """The first line of a body, short enough for the inbox list."""
-    return clean_text(body, MESSAGE_PREVIEW_LENGTH)
+    """The first line of a body, short enough for the inbox list.
+
+    A message written with a ``[label](address)`` link reads as its label here.
+    The list is a glance at who said what, and the brackets plus a long address
+    would crowd out the words - the link itself is a link in the conversation
+    beside it, which is where anybody clicks it.
+    """
+    flat = LINK_IN_TEXT_RE.sub(
+        lambda match: match.group(1) if match.group(1) is not None else match.group(0),
+        body or "",
+    )
+    return clean_text(flat, MESSAGE_PREVIEW_LENGTH)
 
 
 def moderatable_content(users, per_user=MODERATION_PICKER_PER_USER):
@@ -1524,6 +1545,21 @@ def moderation_threads(limit=25):
     """
     account = moderation_account()
     return conversations_for(account, limit=limit) if account else []
+
+
+def inbox_threads(user, standing_in=False):
+    """The conversation list down the left of the messages page.
+
+    Whose threads those are depends on who is looking. Your own account's, which
+    is the ordinary case; the site's, when an admin is reading the site's side of
+    a thread - the list has to hold the conversation that is open, or the pane
+    would be showing something the column beside it denies exists. A shared
+    ADMIN_PASSWORD is not an account, so an admin with no session gets the site's
+    list too rather than an empty column.
+    """
+    if user and not standing_in:
+        return conversations_for(user)
+    return moderation_threads()
 
 
 def latest_ban_causes():
@@ -2632,10 +2668,14 @@ def render_post_page(item):
         abort(404)
 
     if request.method == "POST":
-        if not session.get("user_db_id"):
+        # The account row itself, not the session id: this route writes a comment
+        # keyed to that id, so a cookie left over from a database that no longer
+        # has the row would fail the foreign key instead of the sign-in check.
+        commenter = current_user()
+        if not commenter:
             flash("Log in or create an account to comment.", "error")
             return redirect(url_for("login", next=canonical + "#comments"))
-        comment_ban = active_bans(current_user()).get("comment")
+        comment_ban = active_bans(commenter).get("comment")
         if comment_ban:
             # Reading the thread is still allowed; only writing to it is not.
             flash(ban_message("comment", comment_ban), "error")
@@ -2660,7 +2700,7 @@ def render_post_page(item):
         else:
             execute(
                 "INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)",
-                item["id"], session["user_db_id"], content, parent["id"] if parent else None,
+                item["id"], commenter["id"], content, parent["id"] if parent else None,
             )
             return redirect(canonical + anchor)
 
@@ -2678,7 +2718,10 @@ def vote_post(post_id):
     item = first("SELECT id FROM posts WHERE id=? AND status='published'", post_id)
     if not item:
         abort(404)
-    if not session.get("user_db_id"):
+    # The account row rather than the session id, for the same reason a comment
+    # is written with it: this inserts a row keyed to that id.
+    voter = current_user()
+    if not voter:
         flash("Sign in to like or dislike posts.", "error")
         return redirect(url_for("login", next=post_path(post_id)))
     try:
@@ -2687,7 +2730,7 @@ def vote_post(post_id):
         value = 0
     if value not in (-1, 1):
         value = 0
-    user_id = session["user_db_id"]
+    user_id = voter["id"]
     existing = first(
         "SELECT value FROM post_votes WHERE post_id=? AND user_id=?", post_id, user_id
     )
@@ -3497,6 +3540,13 @@ def new_conversation(username):
             return redirect(url_for("conversation", conversation_id=thread["id"]) + "#bottom")
     return render_template(
         "conversation.html",
+        # No thread exists yet, so nothing in the list is the open one - but the
+        # right pane is open all the same, holding the first message being typed.
+        threads=conversations_for(user),
+        notices=standalone_notices(user["id"]),
+        unread=unread_messages(user),
+        selected=None,
+        composing=True,
         conversation=None,
         other=target,
         heading=conversation_heading(target),
@@ -3553,6 +3603,13 @@ def conversation(conversation_id):
     rows = conversation_messages(thread["id"])
     return render_template(
         "conversation.html",
+        # The list beside the thread is the same one the inbox shows, which is
+        # what makes the page read as one screen: pick another person on the left
+        # and the pane on the right changes.
+        threads=inbox_threads(user, standing_in=standing_in),
+        notices=standalone_notices(user["id"]) if user else [],
+        unread=unread_messages(user),
+        selected=thread["id"],
         conversation=thread,
         other=other,
         heading=conversation_heading(other),

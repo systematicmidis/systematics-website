@@ -37,7 +37,7 @@
      text if it never runs. #}
   <script src="/static/localtime.js" defer></script>
 </head>
-<body>
+<body class="{% block page_class %}{% endblock %}">
 {# Google+ kept every link in a rail against the left edge of the window and put
    the stream in one narrow column centred in the space that was left, with
    nothing along the top. This is that shape: one rail, one column, no top bar.

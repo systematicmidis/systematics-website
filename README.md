@@ -194,14 +194,24 @@ deploy that carries this code, since the GitHub Action ships code and never migr
 
 ## Messages
 
-Messaging is Hangouts-shaped. `/messages` is the inbox - one row per conversation, newest first,
-with whoever spoke last and what they said - and `/messages/c/<id>` is the thread itself: your own
-lines tinted and pushed right, theirs flat on the left, `Seen` on a message the other person has
-opened. The rail carries the unread count, an unread thread is tinted and underlined in red, and
-**Mark all read** clears the lot. A conversation starts from the **Message** button on anybody's
-profile (beside Follow) or from the box at the top of the inbox, which takes a handle. Nothing is
-written until the first line is actually sent, so following a link cannot litter the database with
-empty threads.
+Messaging is a Hangouts-shaped screen rather than a page of links. `/messages` is two panes: the
+people you have spoken to down the left - one row per conversation, newest first, with whoever
+spoke last and what they said - and the conversation itself on the right of them. Choosing a row
+opens that thread beside it, and `/messages/c/<id>` is that same screen with the thread already
+chosen, so a shared link and a click in the list are one view. In the thread your own lines are
+tinted and pushed right, theirs flat on the left, and `Seen` marks a message the other person has
+opened. The rail carries the unread count, an unread row is tinted and badged **N new**, and the
+open thread is ruled on its left. **Mark all read** clears the lot.
+
+The left column is the same on all three screens - the inbox, an open thread and the first message
+to somebody new - so moving between conversations never loses your place, and the whole thing comes
+from one template (`messages.html`, whose right-hand pane `conversation.html` fills in) rather than
+three that drift apart. The inbox opens on an empty pane instead of jumping into the newest
+conversation, because opening a thread is what marks it read: a moderation notice must not be
+marked read by a page nobody chose to open. A conversation starts from the **Message** button on
+anybody's profile (beside Follow) or from the box at the top of the list, which takes a handle.
+Nothing is written until the first line is actually sent, so following a link cannot litter the
+database with empty threads.
 
 A thread belongs to exactly two accounts: `conversations` stores the pair as
 `user_low`/`user_high` (always smaller id first, `UNIQUE(user_low, user_high)`), so the same two
@@ -223,11 +233,16 @@ reply arrives in the same thread, which the admin panel reads and answers.
 
 That is what `moderation_account()` (one lookup per request, cached on `g`) and
 `conversation_with_moderation()` are for: an admin may read and write the site's side of a thread
-because that account has no session of its own. The panel's **Site messages** section lists those
-conversations with their unread reply counts, opening one marks the site's side read, and the
-**Message &lt;name&gt; as the site** box on any account row writes into the same conversation. A
-thread the admin is standing in shows a note saying whose voice the box below is; the bubbles still
-line up on the site's side, because that is who is speaking.
+because that account has no session of its own.
+
+The list down the left of such a thread comes from `inbox_threads()`, which hands an admin standing
+in the site's conversations and everybody else their own: the pane can never show a thread the
+column beside it denies exists, and the shared `ADMIN_PASSWORD` - not an account, so it has no
+inbox of its own - still gets the site's list rather than an empty column. The panel's **Site
+messages** section lists those conversations with their unread reply counts, opening one marks the
+site's side read, and the **Message &lt;name&gt; as the site** box on any account row writes into
+the same conversation. A thread the admin is standing in shows a note saying whose voice the box
+below is; the bubbles still line up on the site's side, because that is who is speaking.
 
 **If the account is missing, nothing breaks.** A fresh local database (or a renamed account) has
 no voice to write as, so `notice_conversation()` returns nothing, notices are written with
@@ -466,6 +481,12 @@ of the window for the top: the brand and the theme/sign-out buttons on one row, 
 as one strip that scrolls sideways. That strip is usually wider than the phone - it has its own
 scrollbar - so the page itself still measures exactly the width of the viewport.
 
+The messages screen is two panes on a desktop and one at a time on a phone: under 850px the list
+is what you get while nothing is open, and once something is, the conversation takes the screen and
+the header's **← All messages** link is the way back (the `has-pane` class on `.dm-shell` is what
+switches between them). Type is what shrinks first: the rail, the list rows and the bubbles all
+step down at 560px rather than forcing a sideways scroll.
+
 ## Shape of the page
 
 The shell copies Google+: every link lives in a rail against the left edge of the window, the
@@ -660,6 +681,14 @@ not database migrations.
 
 ## Notes and gotchas
 
+- **A session cookie is checked against the database, not just for its presence.** `login_required`
+  reads the account row (`current_user()`) and, when the row is gone - a database restored from a
+  backup, a local one reset, an account removed by hand in D1 - clears the cookie and sends the
+  visitor to sign in with an explanation. The comment and vote routes resolve the account the same
+  way instead of trusting `session["user_db_id"]`, because they insert rows keyed to that id. This
+  is not hypothetical: a cookie naming a missing row reached `/messages` and raised a
+  `TypeError` through the view, which in front of a Cloudflare Worker is an error 1101 for whoever
+  is reading.
 - **`requirements.txt` must not exist.** pywrangler refuses to run while it is present;
   dependencies belong in `pyproject.toml`. (It was deleted in this conversion - `app.py`'s
   dependencies are already listed there.)

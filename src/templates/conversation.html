@@ -1,10 +1,13 @@
-{% extends "base.html" %}
+{% extends "messages.html" %}
 {% block title %}{{ heading.display_name }} · Messages · Systematics Black Midi site{% endblock %}
-{% block content %}
-{# One conversation, oldest message first, the way a chat reads: your own lines on
-   the right, theirs on the left. The same template serves a thread that does not
-   exist yet (opened from a profile or the inbox box), where `conversation` is none
-   and the first message sent is what creates it.
+{% block pane %}
+{# The right-hand pane of the messaging screen: one conversation, oldest message
+   first, the way a chat reads - your own lines on the right, theirs on the left.
+   The list of everybody you have spoken to stays down the left of it.
+
+   The same pane serves a conversation that does not exist yet (opened from a
+   profile or the inbox box), where `conversation` is none and the first message
+   sent is what creates it.
 
    A notice from the site is an ordinary message in here - it is one from the
    moderation account - so it arrives as a bubble like any other, carrying the post
@@ -28,6 +31,8 @@
       </small>
     </span>
   </a>
+  {# Only the phone layout needs this: there the list and the pane are one at a
+     time, so the way back to the list has to be on the conversation itself. #}
   <a class="convo-back" href="{{ url_for('messages') }}">← All messages</a>
 </header>
 
@@ -97,8 +102,11 @@
   {% else %}
     <li class="convo-empty muted">No messages yet - write the first one below.</li>
   {% endfor %}
+  {# The stream has its own scroll, so the anchor lives inside it: a browser jumps
+     to the nearest scrollable ancestor of an #anchor, and sending a message lands
+     on the newest line rather than at the top of the thread. #}
+  <li class="convo-anchor" id="bottom" aria-hidden="true"></li>
 </ol>
-<div id="bottom"></div>
 
 {% if can_post %}
   <form class="convo-compose" method="post" action="{{ request.path }}">
@@ -110,4 +118,15 @@
 {% else %}
   <p class="muted">This is somebody else's conversation, so there is nothing to type here.</p>
 {% endif %}
+
+{# A chat reads from the bottom up, so opening a thread should show the newest
+   line rather than the first one ever exchanged. Nothing depends on this: the
+   thread is chronological either way, and a reader who scrolls finds everything
+   where it always was. #}
+<script>
+  (function () {
+    var stream = document.querySelector('.convo-stream');
+    if (stream) { stream.scrollTop = stream.scrollHeight; }
+  })();
+</script>
 {% endblock %}

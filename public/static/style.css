@@ -877,9 +877,53 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
   background:var(--accent); color:var(--on-accent);
   font-size:11px; font-weight:500; line-height:16px; text-align:center;
 }
-.messages-header { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; }
-.messages-tools { margin:0 0 12px; text-align:right; }
-.messages-tools button { margin-top:0; padding:6px 12px; font-size:12px; }
+/* Messages: the two-pane screen ----------------------------------------------
+   Hangouts had the people you have spoken to down one side and the conversation
+   itself beside them, and picking a row is what opened it. This is that shape:
+   .dm-list on the left, .dm-pane on the right, one template for the inbox, an
+   open thread and the first message to somebody new.
+
+   The whole page is wider than the rest of the site, because the stream column's
+   640px is one column and this is two. On a phone the pair become one at a time -
+   the list while nothing is open, the conversation once something is (see the
+   850px breakpoint below) - with the thread header's "All messages" link as the
+   way back. */
+body.page-messages .feed { width:min(1040px, 100%); }
+.dm-shell {
+  display:grid; grid-template-columns:minmax(0, 300px) minmax(0, 1fr);
+  gap:16px; align-items:start;
+}
+.dm-list, .dm-pane { min-width:0; }
+.dm-list-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:0 0 10px; }
+.dm-list-head h1 { margin:0; font-size:20px; font-weight:400; }
+.dm-tools { margin:0 0 0 auto; }
+.dm-tools button { margin:0; padding:5px 10px; font-size:12px; }
+.dm-scroll { min-height:0; }
+.dm-none { margin:0; padding:14px; background:var(--card); border:1px solid var(--line); }
+/* Nothing picked yet: the inbox opens on this rather than jumping into the newest
+   conversation itself, because opening a thread is what marks it read. */
+.dm-placeholder {
+  padding:36px 26px; background:var(--card); border:1px solid var(--line);
+  color:var(--text-dim); text-align:center;
+}
+.dm-placeholder strong { display:block; margin-bottom:6px; color:var(--text); font-weight:500; }
+.dm-placeholder p { margin:0 auto; max-width:360px; color:var(--text-soft); }
+/* On a desktop the list stays put while the conversation beside it scrolls,
+   and scrolls inside itself once there are more conversations than fit. */
+@media (min-width: 851px) {
+  .dm-list {
+    position:sticky; top:16px; max-height:calc(100vh - 32px);
+    display:flex; flex-direction:column;
+  }
+  .dm-scroll { overflow-y:auto; }
+}
+@media (max-width: 850px) {
+  body.page-messages .feed { width:min(600px, 100%); }
+  .dm-shell { display:block; }
+  .dm-shell .dm-pane { display:none; }
+  .dm-shell.has-pane .dm-list { display:none; }
+  .dm-shell.has-pane .dm-pane { display:block; }
+}
 .message-list { background:var(--card); border:1px solid var(--line); border-bottom:0; }
 .message-row {
   display:flex; gap:12px; padding:12px 14px;
@@ -946,13 +990,17 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
    written against the :root tokens, so the dark theme themes all of it. */
 .messages-new { display:flex; gap:8px; margin:0 0 12px; }
 .messages-new input {
-  flex:1; min-width:0; padding:8px 10px; font:inherit;
+  flex:1; min-width:0; padding:7px 9px; font-size:13px;
   border:1px solid var(--line); border-radius:3px;
   background:var(--field); color:var(--text);
 }
-.messages-new button { margin:0; }
+.messages-new button { margin:0; padding:7px 11px; font-size:13px; }
 .notices-heading { margin-top:18px; }
 .snippet-prefix { color:var(--text-dim); }
+/* The conversation currently in the pane. Defined after .is-unread on purpose:
+   a row that is both open and unread should read as open, since opening it is
+   what clears the unread count. */
+.message-row.is-open { background:var(--surface-3); box-shadow:inset 3px 0 0 var(--link); }
 
 .convo-head {
   display:flex; align-items:center; justify-content:space-between; gap:12px;
@@ -997,6 +1045,9 @@ html[data-theme="dark"] .theme-icon-dark { display:none; }
 }
 .bubble-ban { margin:8px 0 0; font-size:12px; color:var(--text-dim); }
 .convo-empty { margin:0; }
+/* The end-of-thread marker the browser scrolls to after a send. It has to keep a
+   box - display:none would make it unreachable - so it is a zero-height one. */
+.convo-anchor { height:0; }
 .convo-compose {
   display:flex; gap:8px; padding:12px 16px;
   background:var(--card); border:1px solid var(--line); border-top:0;

@@ -1,102 +1,122 @@
 {% extends "base.html" %}
 {% block title %}Messages · Systematics Black Midi site{% endblock %}
+{% block page_class %}page-messages{% endblock %}
 {% block content %}
-{# The inbox, the way Hangouts showed it: one row per conversation, newest first,
-   with whoever was last to speak and what they said. Notices from the site are
-   ordinary conversations with the moderation account, so they live here too -
-   there is no separate "notifications" corner to remember to check. #}
-<div class="feed-header messages-header">
-  <h1>Messages</h1>
-  <p>
-    {%- if threads %}
-      {% if unread %}{{ unread }} unread in {{ threads|length }}
-      conversation{% if threads|length != 1 %}s{% endif %}.
-      {%- else %}{{ threads|length }} conversation{% if threads|length != 1 %}s{% endif %},
-      nothing unread.{% endif %}
-    {%- else %}
-      Nobody here yet. Start a conversation with the box below, or with the
-      Message button on anybody's profile.
-    {%- endif %}
-  </p>
-</div>
+{# The messaging screen, in the shape Hangouts had: the people you have spoken to
+   down the left, the conversation itself on the right of them, and picking a row
+   on the left is what opens the right-hand side.
 
-{# Start a conversation by handle. The profile pages have the same control, but
-   this is how you reach somebody whose profile you are not looking at. #}
-<form class="messages-new" method="post" action="{{ url_for('start_conversation') }}">
-  <input name="to" maxlength="24" placeholder="Message somebody: @username"
-         aria-label="Username to message" required>
-  <button type="submit">New message</button>
-</form>
+   Every page of the messaging system is this one screen - the inbox, an open
+   thread, and the first message to somebody new - which is why they all come
+   through this template and only the pane changes. The list is the same on all
+   three, so moving between conversations never loses your place.
 
-{% if unread %}
-<div class="messages-tools">
-  <form method="post" action="{{ url_for('read_messages') }}">
-    <button type="submit">Mark all read</button>
-  </form>
-</div>
-{% endif %}
+   A notice from the site is an ordinary conversation with the moderation
+   account, so it sits in this same list. #}
+{% set pane_open = selected or composing %}
+<div class="dm-shell{% if pane_open %} has-pane{% endif %}">
 
-<section class="message-list conversation-list">
-  {% for item in threads %}
-    <a class="message-row conversation-row{% if item.unread %} is-unread{% endif %}"
-       href="{{ url_for('conversation', conversation_id=item.conversation.id) }}">
-      <span class="message-who">
-        {% if item.other.profile_picture %}
-          <img class="avatar small-avatar avatar-img"
-               src="{{ url_for('uploads', filename=item.other.profile_picture) }}" alt="">
+  <aside class="dm-list">
+    <div class="dm-list-head">
+      <h1>Messages</h1>
+      {% if unread %}<span class="badge badge-new">{{ unread }} unread</span>{% endif %}
+      {% if unread %}
+        <form class="dm-tools" method="post" action="{{ url_for('read_messages') }}">
+          <button type="submit" title="Mark every conversation read">Mark all read</button>
+        </form>
+      {% endif %}
+    </div>
+
+    {# Start a conversation by handle. The profile pages have the same control,
+       but this is how you reach somebody whose profile you are not looking at -
+       and the only way to write to a person who has never written to you. #}
+    <form class="messages-new" method="post" action="{{ url_for('start_conversation') }}">
+      <input name="to" maxlength="24" placeholder="@username" aria-label="Username to message" required>
+      <button type="submit">New</button>
+    </form>
+
+    <div class="dm-scroll">
+      <section class="message-list conversation-list">
+        {% for item in threads %}
+          {# The row of the conversation currently in the pane, so the two halves
+             of the screen agree about which one you are reading. #}
+          <a class="message-row conversation-row{% if item.unread %} is-unread{% endif %}{% if selected == item.conversation.id %} is-open{% endif %}"
+             href="{{ url_for('conversation', conversation_id=item.conversation.id) }}">
+            <span class="message-who">
+              {% if item.other.profile_picture %}
+                <img class="avatar small-avatar avatar-img"
+                     src="{{ url_for('uploads', filename=item.other.profile_picture) }}" alt="">
+              {% else %}
+                {# The site's own account is tinted so a notice reads differently from a
+                   friend at a glance, without being a different kind of thing. #}
+                <span class="avatar small-avatar{% if item.other.id == moderation_id %} bot-avatar{% endif %}"
+                      aria-hidden="true">{{ item.other.display_name|name_initial }}</span>
+              {% endif %}
+            </span>
+            <span class="message-main">
+              <span class="message-top">
+                <strong>{{ item.other.display_name }}</strong>
+                {% if item.other.id == moderation_id %}<span class="badge badge-systematics">the site</span>{% endif %}
+                {% if item.unread %}<span class="badge badge-new">{{ item.unread }} new</span>{% endif %}
+              </span>
+              <span class="message-snippet">
+                {%- if item.last_is_mine %}<span class="snippet-prefix">You: </span>{% endif -%}
+                {{ item.last_body|message_preview }}
+              </span>
+              <span class="message-from">
+                {{ item.total }} message{% if item.total != 1 %}s{% endif %}
+              </span>
+            </span>
+            <span class="message-when">{{ (item.last_at or item.conversation.created_at or '')[:16] }}</span>
+          </a>
         {% else %}
-          {# The site's own account is tinted so a notice reads differently from a
-             friend at a glance, without being a different kind of thing. #}
-          <span class="avatar small-avatar{% if item.other.id == moderation_id %} bot-avatar{% endif %}"
-                aria-hidden="true">{{ item.other.display_name|name_initial }}</span>
-        {% endif %}
-      </span>
-      <span class="message-main">
-        <span class="message-top">
-          <strong>{{ item.other.display_name }}</strong>
-          {% if item.other.id == moderation_id %}<span class="badge badge-systematics">the site</span>{% endif %}
-          {% if item.unread %}<span class="badge badge-new">{{ item.unread }} new</span>{% endif %}
-        </span>
-        <span class="message-snippet">
-          {%- if item.last_is_mine %}<span class="snippet-prefix">You: </span>{% endif -%}
-          {{ item.last_body|message_preview }}
-        </span>
-        <span class="message-from">
-          {{ item.total }} message{% if item.total != 1 %}s{% endif %}
-        </span>
-      </span>
-      <span class="message-when">{{ (item.last_at or item.conversation.created_at or '')[:16] }}</span>
-    </a>
-  {% else %}
-    <p class="muted">No conversations yet.</p>
-  {% endfor %}
-</section>
+          <p class="muted dm-none">No conversations yet. Type a username above, or use
+            the Message button on anybody's profile.</p>
+        {% endfor %}
+      </section>
 
-{% if notices %}
-{# Notices written before the site had an account to write them as. They have no
-   conversation to belong to, so the inbox lists them on their own rather than
-   dropping them - see standalone_notices() in src/worker.py. #}
-<div class="section-heading notices-heading">
-  <h2>Notices</h2><span>{{ notices|length }}</span>
+      {% if notices %}
+      {# Notices written before the site had an account to write them as. They have no
+         conversation to belong to, so the list carries them on their own rather than
+         dropping them - see standalone_notices() in src/worker.py. #}
+      <div class="section-heading notices-heading">
+        <h2>Notices</h2><span>{{ notices|length }}</span>
+      </div>
+      <section class="message-list">
+        {% for item in notices %}
+          <a class="message-row{% if not item.read_at %} is-unread{% endif %}"
+             href="{{ url_for('message', message_id=item.id) }}">
+            <span class="message-who">
+              <span class="avatar small-avatar bot-avatar" aria-hidden="true">✦</span>
+            </span>
+            <span class="message-main">
+              <span class="message-top">
+                <strong>{{ item.subject or 'A notice from the site' }}</strong>
+                {% if not item.read_at %}<span class="badge badge-new">new</span>{% endif %}
+              </span>
+              <span class="message-snippet">{{ item.body|message_preview }}</span>
+              <span class="message-from">{{ item.sender_label }}{% if item.about_id %} · about your {{ item.about_kind }}{% endif %}</span>
+            </span>
+            <span class="message-when">{{ (item.created_at or '')[:16] }}</span>
+          </a>
+        {% endfor %}
+      </section>
+      {% endif %}
+    </div>
+  </aside>
+
+  <section class="dm-pane">
+    {% block pane %}
+      {# Nothing picked yet. The inbox opens like this rather than jumping into the
+         newest conversation on its own: opening a thread is what marks it read,
+         and a notice should not be marked read by a page nobody chose to open. #}
+      <div class="dm-placeholder">
+        <strong>Pick a conversation</strong>
+        <p>Choose somebody from the list, or start a new one with the box above it.
+          Your messages open here, beside the list.</p>
+      </div>
+    {% endblock %}
+  </section>
+
 </div>
-<section class="message-list">
-  {% for item in notices %}
-    <a class="message-row{% if not item.read_at %} is-unread{% endif %}"
-       href="{{ url_for('message', message_id=item.id) }}">
-      <span class="message-who">
-        <span class="avatar small-avatar bot-avatar" aria-hidden="true">✦</span>
-      </span>
-      <span class="message-main">
-        <span class="message-top">
-          <strong>{{ item.subject or 'A notice from the site' }}</strong>
-          {% if not item.read_at %}<span class="badge badge-new">new</span>{% endif %}
-        </span>
-        <span class="message-snippet">{{ item.body|message_preview }}</span>
-        <span class="message-from">{{ item.sender_label }}{% if item.about_id %} · about your {{ item.about_kind }}{% endif %}</span>
-      </span>
-      <span class="message-when">{{ (item.created_at or '')[:16] }}</span>
-    </a>
-  {% endfor %}
-</section>
-{% endif %}
 {% endblock %}
