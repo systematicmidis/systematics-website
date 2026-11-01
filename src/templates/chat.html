@@ -1,0 +1,108 @@
+{% extends "messages.html" %}
+{% from "_widgets.html" import small_avatar with context %}
+{% block title %}{{ chat.title }} · Messages · Systematics Black Midi site{% endblock %}
+{% block pane %}
+{# A group Hangout: the same right-hand pane a DM opens in, with a member strip,
+   a call button and everybody's lines in one stream. The people you have spoken to
+   stay down the left, groups included. #}
+<header class="convo-head">
+  <div class="convo-who">
+    <span class="avatar group-avatar" aria-hidden="true">◎</span>
+    <span class="convo-who-text">
+      <strong>{{ chat.title }}</strong>
+      <small>{{ members|length }} member{% if members|length != 1 %}s{% endif %}
+        · group Hangout{% if my_role == 'owner' %} · you started it{% endif %}</small>
+    </span>
+  </div>
+  <div class="convo-tools">
+    {% if can_post %}
+      <form method="post" action="{{ url_for('call_group_chat', chat_id=chat.id) }}">
+        <button class="button small" type="submit" title="Start a voice and video call">
+          ▶ Start a call</button>
+      </form>
+    {% endif %}
+    <a class="convo-back" href="{{ url_for('messages') }}">← All messages</a>
+  </div>
+</header>
+
+<div class="chat-members">
+  {% for person in members %}
+    <a class="chat-member" href="{% if person.deleted_at %}#{% else %}{{ url_for('profile', username=person.username) }}{% endif %}"
+       title="{{ person.display_name }}{% if person.role != 'member' %} · {{ person.role }}{% endif %}">
+      {{ small_avatar(person.profile_picture, person.display_name) }}
+      <span>{{ person.display_name }}</span>
+      {% if person.role == 'owner' %}<span class="badge badge-joined">owner</span>{% endif %}
+    </a>
+  {% endfor %}
+</div>
+
+<details class="chat-admin">
+  <summary>Hangout options</summary>
+  <div class="chat-admin-grid">
+    <form method="post" action="{{ url_for('rename_chat', chat_id=chat.id) }}" class="inline-form">
+      <input name="title" value="{{ chat.title }}" maxlength="{{ max_chat_title }}"
+             aria-label="New Hangout name" required>
+      <button type="submit">Rename</button>
+    </form>
+    <form method="post" action="{{ url_for('add_chat_member', chat_id=chat.id) }}" class="inline-form">
+      <input name="username" placeholder="@handle" maxlength="24"
+             aria-label="Person to add" required>
+      <button type="submit">Add someone</button>
+    </form>
+    <form method="post" action="{{ url_for('leave_chat', chat_id=chat.id) }}"
+          onsubmit="return confirm('Leave this Hangout?')">
+      <button class="link-button danger" type="submit">Leave the Hangout</button>
+    </form>
+  </div>
+</details>
+
+<ol class="convo-stream">
+  {% for item in chat_messages %}
+    {% set is_mine = item.sender_id == current_user.id %}
+    <li class="convo-bubble{% if is_mine %} is-mine{% endif %}" id="message-{{ item.id }}">
+      <div class="bubble">
+        {# In a group a bubble has to say who wrote it; in a DM the two sides
+           already are the two people. #}
+        {% if not is_mine %}
+          <p class="bubble-sender">
+            {% if item.sender_deleted %}{{ item.sender_display_name or 'A deleted account' }}
+            {% else %}<a href="{{ url_for('profile', username=item.sender_username) }}">{{ item.sender_display_name }}</a>{% endif %}
+          </p>
+        {% endif %}
+        {% if item.body %}<div class="bubble-body">{{ item.body|linkify }}</div>{% endif %}
+        {% if item.attachment %}
+          <a class="bubble-image" href="{{ url_for('uploads', filename=item.attachment) }}"
+             data-lightbox="chat-{{ chat.id }}">
+            <img src="{{ url_for('uploads', filename=item.attachment) }}" alt="Shared image" loading="lazy">
+          </a>
+        {% endif %}
+        <div class="bubble-meta">
+          <span class="bubble-time">{{ (item.created_at or '')[:16] }}</span>
+        </div>
+      </div>
+    </li>
+  {% else %}
+    <li class="convo-empty muted">This Hangout is empty - say hello.</li>
+  {% endfor %}
+  <li class="convo-anchor" id="bottom" aria-hidden="true"></li>
+</ol>
+
+{% if can_post %}
+  <form class="convo-compose" method="post" action="{{ request.path }}"
+        enctype="multipart/form-data">
+    <textarea name="body" rows="2" maxlength="{{ MAX_DM_LENGTH }}"
+              placeholder="Message {{ chat.title }}…" aria-label="Message the group"></textarea>
+    <label class="compose-attach" title="Attach a picture">
+      <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp">
+    </label>
+    <button type="submit">Send</button>
+  </form>
+{% endif %}
+
+<script>
+  (function () {
+    var stream = document.querySelector('.convo-stream');
+    if (stream) { stream.scrollTop = stream.scrollHeight; }
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "messages.html" %}
+{% block title %}New group Hangout · Messages · Systematics Black Midi site{% endblock %}
+{% block pane %}
+{# The first screen of a group Hangout: a title and the people to start it with.
+   A Hangout is the group thread - the same screen as a DM, with more than one
+   person in it. #}
+<div class="dm-compose-pane">
+  <header class="convo-head">
+    <div class="convo-who">
+      <span class="avatar group-avatar" aria-hidden="true">◎</span>
+      <span class="convo-who-text">
+        <strong>New group Hangout</strong>
+        <small>Start a conversation with a few people at once</small>
+      </span>
+    </div>
+    <a class="convo-back" href="{{ url_for('messages') }}">← All messages</a>
+  </header>
+
+  <form class="group-new-form" method="post" action="{{ url_for('new_group_chat') }}">
+    <label>Name this Hangout
+      <input name="title" value="{{ title_value }}" maxlength="{{ max_chat_title }}"
+             placeholder="Armageddon listening party" required autofocus>
+      <small>Up to {{ max_chat_title }} characters. Everybody in it can rename it later.</small>
+    </label>
+    <label>Who is in it
+      <textarea name="members" rows="3" required
+                placeholder="@handle @handle">{{ members_value }}</textarea>
+      <small>Separate handles with spaces or commas, up to {{ MAX_CHAT_MEMBERS }} people.
+        You are added automatically. People you add get a notification.</small>
+    </label>
+    <div class="actions">
+      <button type="submit">Start the Hangout</button>
+      <a href="{{ url_for('messages') }}">Cancel</a>
+    </div>
+  </form>
+
+  <p class="muted small-note">You can start a voice/video call from inside the group
+    once it exists, add more people, and leave at any time.</p>
+</div>
+{% endblock %}

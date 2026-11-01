@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Two-step verification · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="auth-card">
+  <h1>Two-step verification</h1>
+  <p class="muted">Your password was right. Enter the six-digit code from your
+    authenticator app - or one of your recovery codes, if the phone is gone.</p>
+  <form method="post">
+    <label>Code
+      <input name="code" inputmode="numeric" autocomplete="one-time-code"
+             maxlength="16" autofocus required placeholder="123456">
+    </label>
+    {% if error %}<p class="auth-error">{{ error }}</p>{% endif %}
+    <button type="submit">Verify and sign in</button>
+  </form>
+  <p class="auth-bottom"><a href="{{ url_for('login') }}">Back to sign in</a></p>
+</div>
+{% endblock %}

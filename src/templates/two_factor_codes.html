@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Recovery codes · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="auth-card wide-card">
+  <h1>Save your recovery codes</h1>
+  <p class="muted">Each code signs you in once if you lose the authenticator app.
+    They are shown only now - the site stores just their hashes, so it cannot show
+    them again. Keep them somewhere private, not in the same place as the phone.</p>
+
+  <ul class="recovery-codes">
+    {% for code in codes %}<li><code>{{ code }}</code></li>{% endfor %}
+  </ul>
+
+  <div class="settings-links">
+    <a class="button" href="{{ url_for('account_settings') }}">I have saved them</a>
+    <a class="button secondary" href="{{ url_for('settings') }}">Settings</a>
+  </div>
+  <p class="muted small-note">Every other device has been signed out. You can make a
+    fresh set of codes from Account &amp; security at any time - doing so retires
+    these.</p>
+</div>
+{% endblock %}

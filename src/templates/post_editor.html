@@ -107,8 +107,20 @@
         <select name="status">
           <option value="published" {% if not post or post.status == 'published' %}selected{% endif %}>Published</option>
           <option value="draft" {% if post and post.status == 'draft' %}selected{% endif %}>Draft</option>
+          {% if gplus %}
+            <option value="scheduled" {% if post and post.status == 'scheduled' %}selected{% endif %}>Scheduled</option>
+          {% endif %}
         </select>
       </label>
+      {% if gplus %}
+        <label>Publish at
+          <input type="datetime-local" name="publish_at"
+                 value="{{ (post.publish_at or '')|replace(' ', 'T') }}">
+          <span class="muted">For a scheduled post: the site publishes it the next
+            time somebody loads a stream after this time (it is checked on every
+            read, not by a timer). Times are UTC.</span>
+        </label>
+      {% endif %}
     {% else %}
       <p class="muted">Your post is published as soon as you save it.</p>
     {% endif %}
@@ -128,6 +140,14 @@
     </label>
 
     {% if gplus %}
+      <label>Poll
+        <textarea name="poll_options" rows="4"
+                  maxlength="{{ MAX_POLL_OPTIONS * (MAX_POLL_OPTION_LENGTH + 1) }}"
+                  placeholder="One choice per line">{{ poll_value }}</textarea>
+        <span class="muted">Two to {{ MAX_POLL_OPTIONS }} choices, one per line. Leave it
+          empty for a post with no poll. Editing the choices clears the votes they had.</span>
+      </label>
+
       <label>Content warning
         <input name="content_warning" maxlength="120"
                value="{{ post.content_warning if post and post.content_warning else '' }}"

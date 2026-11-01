@@ -1666,3 +1666,158 @@ html[data-theme="dark"] .hangout-row:hover,
 html[data-theme="dark"] .spark-row:hover { background:#1c2029; }
 html[data-theme="dark"] .ripple-stat { background:#191c22; border-color:#2c313c; }
 html[data-theme="dark"] .bragging-rights { background:#191c22; border-left-color:var(--link); }
+
+/* Hangouts, recovery, polls and the rest of the 2019 product ----------------
+   Everything below is written against the tokens at the top of this file, so
+   each panel follows the light and dark themes without a second rule. */
+
+/* Account recovery: the setup steps read as numbered cards rather than a wall of
+   instructions, and the secret itself is the one thing set in a monospace face. */
+.wide-card { max-width:620px; }
+.auth-error { color:var(--accent); margin:8px 0 0; }
+.small-note { font-size:12px; line-height:18px; color:var(--muted); }
+.setup-steps { display:flex; flex-direction:column; gap:18px; margin:18px 0; }
+.setup-step { display:flex; gap:14px; align-items:flex-start; }
+.setup-number {
+  flex:0 0 auto; width:26px; height:26px; border-radius:50%;
+  background:var(--link-soft); color:var(--link); font-weight:500;
+  display:flex; align-items:center; justify-content:center;
+}
+.setup-step strong { display:block; margin-bottom:4px; }
+.setup-step p { margin:4px 0; }
+.totp-secret {
+  display:inline-block; margin:6px 0; padding:8px 12px; background:var(--surface-2);
+  border:1px solid var(--line); border-radius:3px; font-size:15px; letter-spacing:1px;
+  word-break:break-all; color:var(--text);
+}
+.setup-uri { margin-top:10px; }
+.setup-uri textarea { width:100%; font-family:monospace; font-size:12px; }
+.recovery-codes {
+  list-style:none; margin:16px 0; padding:0;
+  display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:8px;
+}
+.recovery-codes code {
+  display:block; padding:8px 10px; background:var(--surface-2);
+  border:1px solid var(--line); border-radius:3px; text-align:center;
+  letter-spacing:1px; color:var(--text);
+}
+.danger-details { margin-top:14px; }
+.danger-details summary { color:var(--accent); cursor:pointer; }
+
+/* Settings screens -------------------------------------------------------- */
+.settings-media { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:12px 0; }
+.settings-thumb { display:block; max-height:110px; margin:6px 0; border-radius:4px; border:1px solid var(--line); }
+.settings-thumb.wide { max-height:80px; }
+@media (max-width:640px) { .settings-media { grid-template-columns:1fr; } }
+
+/* Community and Page extras ------------------------------------------------ */
+.community-banner { width:100%; max-height:220px; object-fit:cover; border-radius:4px; margin-bottom:12px; }
+.community-avatar {
+  width:56px; height:56px; border-radius:50%; object-fit:cover; flex:0 0 auto;
+}
+.community-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.community-actions form { margin:0; }
+.community-rules {
+  background:var(--card); border:1px solid var(--line); border-radius:3px;
+  padding:12px 16px; margin:12px 0;
+}
+.community-rules summary { font-weight:500; cursor:pointer; color:var(--text); }
+.rules-body { margin-top:10px; white-space:pre-wrap; color:var(--text-soft); }
+.report-row { border-top:1px solid var(--border-soft); padding:14px 0; }
+.report-row:first-of-type { border-top:0; }
+.report-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.report-reason { margin:8px 0; color:var(--text); }
+.report-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.report-actions form { margin:0; }
+.report-title { font-size:12px; }
+blockquote { margin:8px 0; padding:8px 12px; border-left:3px solid var(--line); background:var(--surface-2); color:var(--text-soft); }
+
+.filter-chips { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 14px; }
+.chip.is-active { background:var(--link-soft); border-color:var(--link); color:var(--link); }
+.field-label { display:block; font-size:13px; color:var(--muted); }
+
+/* Followers on a Page ----------------------------------------------------- */
+.follower-strip { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:14px 0 0; }
+.follower-chip {
+  display:flex; align-items:center; gap:6px; padding:4px 10px 4px 4px;
+  background:var(--surface-2); border:1px solid var(--line); border-radius:14px;
+  color:var(--text); font-size:12px; max-width:180px;
+}
+.follower-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.follower-chip:hover { text-decoration:none; border-color:var(--link); }
+
+/* Group Hangouts ----------------------------------------------------------
+   The same two panes as a DM; a group adds a member strip, an options drawer and
+   a bubble sender label. */
+.dm-compose-pane { padding:4px 4px 0; }
+.group-new-form { display:flex; flex-direction:column; gap:14px; padding:16px 4px 0; }
+.group-avatar { background:var(--link-soft); color:var(--link); }
+.convo-tools { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.convo-tools form { margin:0; }
+.chat-members { display:flex; flex-wrap:wrap; gap:6px; padding:10px 0 6px; }
+.chat-member {
+  display:flex; align-items:center; gap:5px; padding:3px 9px 3px 3px;
+  background:var(--surface-2); border:1px solid var(--line); border-radius:14px;
+  color:var(--text); font-size:12px;
+}
+.chat-member:hover { text-decoration:none; border-color:var(--link); }
+.chat-admin { background:var(--surface-2); border:1px solid var(--line); border-radius:3px; padding:8px 12px; margin:6px 0; }
+.chat-admin summary { cursor:pointer; color:var(--muted); font-size:12px; }
+.chat-admin-grid { display:flex; flex-direction:column; gap:8px; margin-top:8px; }
+.bubble-sender { margin:0 0 4px; font-size:12px; color:var(--link); }
+.bubble-image { display:block; margin-top:8px; }
+.bubble-image img { max-width:280px; border-radius:6px; border:1px solid var(--line); }
+.compose-attach { align-self:flex-end; }
+.compose-attach input { width:86px; font-size:10px; color:var(--muted); }
+
+/* Polls -------------------------------------------------------------------- */
+.poll-card {
+  border-top:1px solid var(--border-soft); padding:14px 18px 16px; background:var(--surface-2);
+}
+.poll-card h3 { margin:0 0 10px; font-size:14px; font-weight:500; color:var(--text); }
+.poll-options { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.poll-options form { margin:0; }
+.poll-choice {
+  position:relative; display:flex; align-items:center; width:100%;
+  padding:9px 12px; margin:0; background:var(--field); border:1px solid var(--line);
+  border-radius:3px; color:var(--text); text-align:left; font-size:13px; overflow:hidden;
+  cursor:pointer;
+}
+.poll-choice:hover { border-color:var(--link); }
+.poll-choice.is-mine { border-color:var(--link); }
+.poll-choice.is-static { cursor:default; }
+.poll-bar {
+  position:absolute; inset:0 auto 0 0; background:var(--link-soft); z-index:0;
+}
+.poll-choice.is-mine .poll-bar { background:#d2e3fc; }
+.poll-label, .poll-count { position:relative; z-index:1; }
+.poll-count { margin-left:auto; color:var(--muted); font-size:12px; }
+
+/* Comment pictures and post history --------------------------------------- */
+.comment-images { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+.comment-images img { max-height:110px; border-radius:4px; border:1px solid var(--line); }
+.comment-attach input { width:96px; font-size:11px; color:var(--muted); }
+.revision-box {
+  border:1px solid var(--line); background:var(--card); border-radius:3px;
+  padding:10px 16px; margin:12px 0;
+}
+.revision-box summary { cursor:pointer; font-weight:500; }
+.revision-row { border-top:1px solid var(--border-soft); padding:10px 0; }
+.revision-row:first-of-type { border-top:0; }
+.revision-row strong { display:block; margin-top:2px; }
+
+/* Events and Hangout invitations ------------------------------------------ */
+.event-cover { width:100%; max-height:300px; object-fit:cover; border-radius:4px; margin-bottom:12px; }
+.event-links { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.event-links form { margin:0; }
+.hangout-invites { font-size:12px; }
+
+/* Phones: the rail already scrolls sideways, so these only need to stop the new
+   two-column pieces from overflowing. */
+@media (max-width:640px) {
+  .community-header { flex-direction:column; align-items:flex-start; }
+  .convo-head { flex-wrap:wrap; }
+  .convo-tools { margin-left:0; width:100%; }
+  .p
+
+.auth-forgot { margin:-6px 0 14px; font-size:12px; }

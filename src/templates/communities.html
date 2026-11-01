@@ -10,13 +10,47 @@
   <div class="empty">Communities need the newest database migration. Run
     <code>npm run db:remote</code> and reload.</div>
 {% else %}
+  {% if categories %}
+    <nav class="filter-chips" aria-label="Community categories">
+      <a class="chip{% if not category %} is-active{% endif %}" href="{{ url_for('communities') }}">Everything</a>
+      {% for item in categories %}
+        <a class="chip{% if category == item %} is-active{% endif %}"
+           href="{{ url_for('communities', category=item) }}">{{ item }}</a>
+      {% endfor %}
+    </nav>
+  {% endif %}
+
   {% if current_user %}
     <details class="create-panel">
       <summary>Start a community</summary>
-      <form class="inline-form stacked" method="post" action="{{ url_for('create_community') }}">
+      <form class="inline-form stacked" method="post" action="{{ url_for('create_community') }}"
+            enctype="multipart/form-data">
         <input name="name" maxlength="{{ max_name }}" placeholder="Community name" required>
         <input name="slug" maxlength="40" placeholder="Address, e.g. black-midi" required pattern="[a-z0-9-]{3,40}">
         <input name="description" maxlength="{{ max_description }}" placeholder="What is it for? (optional)">
+        {% if can_extras %}
+          <label class="field-label">Category
+            <select name="category">
+              <option value="">No category</option>
+              {% for item in categories %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="field-label">Who can join
+            <select name="join_policy">
+              {% for value, label in join_policies.items() %}
+                <option value="{{ value }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <textarea name="rules" rows="3" maxlength="{{ max_rules }}"
+                    placeholder="Rules, one per line (optional)"></textarea>
+          <label class="field-label">Avatar
+            <input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp">
+          </label>
+          <label class="field-label">Banner
+            <input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp">
+          </label>
+        {% endif %}
         <button type="submit">Create community</button>
       </form>
     </details>
@@ -27,6 +61,10 @@
       <a class="community-card" href="{{ url_for('community', slug=community.slug) }}">
         <span class="community-badge">c/</span>
         <strong>{{ community.name }}</strong>
+        {% if community.category %}<span class="badge badge-community">{{ community.category }}</span>{% endif %}
+        {% if community.join_policy and community.join_policy != 'open' %}
+          <span class="badge badge-joined">{{ 'Approval to join' if community.join_policy == 'approval' else 'Invite only' }}</span>
+        {% endif %}
         {% if community.description %}<span class="community-desc">{{ community.description }}</span>{% endif %}
         <span class="community-meta">{{ community.member_count }} member{% if community.member_count != 1 %}s{% endif %}
           · {{ community.post_count }} post{% if community.post_count != 1 %}s{% endif %}</span>

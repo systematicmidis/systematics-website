@@ -5,7 +5,15 @@
 <div class="feed-header">
   <p class="eyebrow">HASHTAG</p>
   <h1>#{{ tag }}</h1>
-  <p>{{ posts|length }} post{% if posts|length != 1 %}s{% endif %} carrying this tag.</p>
+  <p>{{ posts|length }} post{% if posts|length != 1 %}s{% endif %} carrying this tag
+    · {{ follower_count }} follower{% if follower_count != 1 %}s{% endif %}</p>
+  {% if current_user and gplus %}
+    {# Following a tag rings the bell when a new post carries it. #}
+    <form method="post" action="{{ url_for('follow_tag', tag=tag) }}">
+      <button class="button{% if not following_tag %} secondary{% endif %}" type="submit">
+        {{ 'Following' if following_tag else 'Follow #' ~ tag }}</button>
+    </form>
+  {% endif %}
 </div>
 {% for item in posts %}
   {{ post_card(item) }}

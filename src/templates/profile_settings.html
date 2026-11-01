@@ -111,6 +111,14 @@
         <input type="file" name="profile_picture" accept="image/png,image/jpeg,image/gif,image/webp">
         <small>PNG, JPG, GIF, or WebP, up to 1.7 MB. Square images work best.</small>
       </label>
+      <label>Picture crop
+        <select name="avatar_position">
+          <option value="top" {% if user.avatar_position == 'top' %}selected{% endif %}>Show the top</option>
+          <option value="center" {% if not user.avatar_position or user.avatar_position == 'center' %}selected{% endif %}>Show the middle</option>
+          <option value="bottom" {% if user.avatar_position == 'bottom' %}selected{% endif %}>Show the bottom</option>
+        </select>
+        <small>Which part of a tall picture the circle keeps.</small>
+      </label>
       {% if user.profile_picture %}
         <label class="checkbox"><input type="checkbox" name="remove_profile_picture" value="1"> Remove my picture</label>
       {% endif %}

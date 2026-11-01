@@ -5,8 +5,22 @@
   <p class="eyebrow">{{ 'Hangout On Air' if hangout.kind == 'onair' else 'Hangout' }}</p>
   <h1>{{ hangout.title }}</h1>
   <p class="muted">Started by <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a>
-    · {{ hangout.created_at[:16] }} UTC{% if hangout.ended_at %} · ended{% endif %}</p>
+    · {{ hangout.created_at[:16] }} UTC{% if hangout.ended_at %} · ended{% endif %}
+    {%- if hangout.scheduled_at and not hangout.ended_at %} · scheduled for {{ hangout.scheduled_at }} UTC{% endif %}
+    {%- if invited %} · <span class="badge badge-circle">You were invited</span>{% endif %}</p>
+  {% if invites %}
+    <p class="muted hangout-invites">
+      {% for person in invites %}<a href="{{ url_for('profile', username=person.username) }}">{{ person.display_name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+      {% if invites|length == 1 %}was invited{% else %}were invited{% endif %}.
+    </p>
+  {% endif %}
   {% if is_owner and not hangout.ended_at %}
+    {# Inviting from here is the same list the DM and group screens use: the room
+       is public to anyone with the link, the invitation is the notification. #}
+    <form class="inline-form" method="post" action="{{ url_for('invite_hangout', room=hangout.room) }}">
+      <input name="username" placeholder="@handle to invite" maxlength="24" required>
+      <button type="submit">Invite</button>
+    </form>
     <form method="post" action="{{ url_for('end_hangout', room=hangout.room) }}">
       <button class="link-button danger" type="submit">End hangout</button>
     </form>

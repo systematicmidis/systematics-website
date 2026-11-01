@@ -15,6 +15,7 @@ Uploaded images are stored as BLOB rows in the D1 `uploads` table rather than
 in R2, so the site runs entirely on the Workers Free plan - enabling R2 requires
 a subscription checkout, D1 does not.
 """
+import base64
 import hashlib
 import hmac
 import html
@@ -26,6 +27,8 @@ import re
 import secrets
 import string
 import struct
+import time
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -166,7 +169,6 @@ MAX_OTHER_SOCIAL_LINKS = 3
 MAX_SOCIAL_LINKS = len(SOCIAL_PLATFORMS) + MAX_OTHER_SOCIAL_LINKS
 MAX_SOCIAL_URL = 300
 MAX_SOCIAL_LABEL = 30
-POST_STATUSES = ("published", "draft")
 # Every post lands in exactly one category: owner accounts write to "systematics",
 # everybody else to "community". Both are public; the split just keeps the owner's
 # posts separable from the community feed (and filterable on the home page).
@@ -216,7 +218,8 @@ FEED_PAGE_SIZE = 20
 NOTIFICATION_PAGE_SIZE = 60
 NOTIFICATION_KINDS = (
     "like", "comment", "reply", "mention", "follow", "share",
-    "comment_like", "tag",
+    "comment_like", "tag", "community", "community_join", "event",
+    "hangout", "page", "tag_post",
 )
 NOTIFICATION_LABELS = {
     "like": "Somebody +1s my posts",
@@ -227,6 +230,12 @@ NOTIFICATION_LABELS = {
     "share": "Somebody reshares my posts",
     "comment_like": "Somebody +1s my comments",
     "tag": "Somebody tags me in a post",
+    "community": "Something happens in a community I moderate",
+    "community_join": "Somebody asks to join my community",
+    "event": "Somebody invites me to an event",
+    "hangout": "Somebody invites me to a hangout",
+    "page": "Somebody follows a page I manage",
+    "tag_post": "A tag I follow gets a new post",
 }
 # The rest of the G+ surfaces, added by migration 0017.
 MAX_PAGE_NAME = 60
@@ -239,6 +248,29 @@ MAX_SPARK_DESCRIPTION = 400
 MAX_SPARK_NOTE = 200
 MAX_HANGOUT_TITLE = 100
 MAX_EMAIL = 120
+# The rest of the product, added by migration 0018.
+MAX_COMMUNITY_RULES = 5000
+COMMUNITY_CATEGORIES = ("Music", "Black MIDI", "Technology", "Art", "Gaming", "Other")
+COMMUNITY_JOIN_POLICIES = {
+    "open": "Anyone can join",
+    "approval": "People ask to join; a moderator approves",
+    "invite": "Invite only",
+}
+PAGE_CATEGORIES = COMMUNITY_CATEGORIES
+MAX_POLL_OPTIONS = 6
+MAX_POLL_OPTION_LENGTH = 80
+MAX_POLL_QUESTION = 120
+MAX_CHAT_TITLE = 60
+MAX_CHAT_MEMBERS = 50
+MAX_COMMENT_IMAGES = 2
+RESET_TOKEN_MINUTES = 60
+VERIFY_TOKEN_HOURS = 48
+TOTP_STEP_SECONDS = 30
+TOTP_DIGITS = 6
+RECOVERY_CODE_COUNT = 8
+# Scheduled posts are published lazily by any feed request whose clock has passed
+# their time; there is no Cron trigger to configure or pay for.
+POST_STATUSES = ("published", "draft", "scheduled")
 # Emails are queued and flushed in batches so a Worker request never waits on a
 # mail provider.
 EMAIL_BATCH_SIZE = 20
@@ -544,7 +576,26 @@ def current_user():
     if "current_user" not in g:
         uid = session.get("user_db_id")
         g.current_user = first("SELECT * FROM users WHERE id=?", uid) if uid else None
+        # "Sign out everywhere" bumps users.session_epoch. A cookie minted before
+        # that bump carries the old value and is dropped here, before any route can
+        # treat it as signed in.
+        if g.current_user and gplus3_schema():
+            stored = session.get("session_epoch")
+            current = int(g.current_user.get("session_epoch") or 0)
+            if stored is not None and int(stored) != current:
+                session.clear()
+                g.current_user = None
     return g.current_user
+
+
+def start_session(user, remember=False):
+    """Sign one account in, carrying the epoch its other sessions can be ended by."""
+    session.clear()
+    session["user_db_id"] = user["id"]
+    if gplus3_schema():
+        session["session_epoch"] = int(user.get("session_epoch") or 0)
+    if remember:
+        session.permanent = True
 
 
 def is_owner_username(username):
@@ -1046,20 +1097,25 @@ def unread_messages(user):
     """
     if not user:
         return 0
+    # Group messages are stored with the sender as recipient (see
+    # send_chat_message), so they must not be counted as unread DMs here; their
+    # unread state is per member and is added below.
+    where = "AND chat_id IS NULL" if gplus3_schema() else ""
     try:
         row = first(
             "SELECT COUNT(*) AS unread FROM messages "
-            "WHERE recipient_id=? AND read_at IS NULL",
+            "WHERE recipient_id=? AND read_at IS NULL " + where,
             user["id"],
         )
     except Exception as exc:
         app.logger.warning("Could not count unread messages: %s", exc)
         return 0
-    return int(row["unread"]) if row else 0
+    return (int(row["unread"]) if row else 0) + unread_chat_messages(user)
 
 
 def send_message(recipient_id, subject, body, *, sender=None, kind="notice",
-                 about=None, ban=None, conversation_id=None):
+                 about=None, ban=None, conversation_id=None, chat_id=None,
+                 attachment=None):
     """Put one message in somebody's inbox; returns its id, or None on failure.
 
     ``sender`` is the account the message appears to come from. A notice passes
@@ -1076,13 +1132,20 @@ def send_message(recipient_id, subject, body, *, sender=None, kind="notice",
     ban = ban or {}
     if sender is None:
         sender = moderation_account() or {}
+    extra_columns = ""
+    extra_values = []
+    if gplus3_schema():
+        extra_columns = ", chat_id, attachment"
+        extra_values = [chat_id, attachment]
     try:
         execute(
             """INSERT INTO messages
                  (recipient_id, sender_id, sender_label, kind, subject, body,
                   about_kind, about_id, about_title, about_excerpt, about_url,
-                  ban_kind, ban_permanent, ban_until, conversation_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  ban_kind, ban_permanent, ban_until, conversation_id"""
+            + extra_columns + ")"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?"
+            + (", ?, ?" if extra_values else "") + ")",
             recipient_id,
             sender.get("id"),
             sender.get("display_name") or sender.get("username")
@@ -1093,7 +1156,7 @@ def send_message(recipient_id, subject, body, *, sender=None, kind="notice",
             about.get("kind"), about.get("id"), about.get("title"),
             about.get("excerpt"), about.get("url"),
             ban.get("kind"), 1 if ban.get("permanent") else 0, ban.get("until"),
-            conversation_id,
+            conversation_id, *extra_values,
         )
     except Exception as exc:
         app.logger.warning("Could not send a message to %s: %s", recipient_id, exc)
@@ -1101,6 +1164,8 @@ def send_message(recipient_id, subject, body, *, sender=None, kind="notice",
     created = first("SELECT last_insert_rowid() AS id")
     if conversation_id:
         touch_conversation(conversation_id)
+    if chat_id:
+        touch_chat(chat_id)
     return created["id"] if created else None
 
 
@@ -1181,6 +1246,166 @@ def conversation_other_id(conversation, user_id):
     """The account on the other side of the thread from ``user_id``."""
     low, high = conversation_participant_ids(conversation)
     return high if user_id == low else low
+
+
+# Group Hangouts ---------------------------------------------------------------
+# A group is a thread of its own (`chat_threads`), not a wider `conversations`
+# row: the pair table keeps serving two-person DMs, and `messages.chat_id` says
+# which kind a message belongs to. That is also why group unread lives on each
+# member's `last_read_at` rather than on a single `recipient_id`.
+
+def chat_by_id(chat_id):
+    if not chat_id or not gplus3_schema():
+        return None
+    return safe_first("SELECT * FROM chat_threads WHERE id=?", chat_id)
+
+
+def chat_member_rows(chat_id):
+    if not chat_id or not gplus3_schema():
+        return []
+    return safe_query("""
+        SELECT users.id, users.username, users.display_name, users.profile_picture,
+               users.deleted_at, chat_members.role, chat_members.last_read_at,
+               chat_members.joined_at
+        FROM chat_members JOIN users ON users.id = chat_members.user_id
+        WHERE chat_members.chat_id=?
+        ORDER BY chat_members.joined_at, users.display_name COLLATE NOCASE
+    """, chat_id)
+
+
+def chat_member_ids(chat):
+    if not chat or not gplus3_schema():
+        return []
+    return [row["id"] for row in chat_member_rows(chat["id"])]
+
+
+def chat_is_member(chat, user):
+    return bool(chat and user and user["id"] in chat_member_ids(chat))
+
+
+def chats_for(user, limit=40):
+    """Every group Hangout ``user`` is in, newest first."""
+    if not user or not gplus3_schema():
+        return []
+    try:
+        rows = query(f"""
+            SELECT chat_threads.*, chat_members.role AS my_role,
+                   chat_members.last_read_at AS my_last_read,
+                   (SELECT body FROM messages WHERE chat_id=chat_threads.id
+                     ORDER BY id DESC LIMIT 1) AS last_body,
+                   (SELECT sender_id FROM messages WHERE chat_id=chat_threads.id
+                     ORDER BY id DESC LIMIT 1) AS last_sender_id,
+                   (SELECT attachment FROM messages WHERE chat_id=chat_threads.id
+                     ORDER BY id DESC LIMIT 1) AS last_attachment,
+                   (SELECT created_at FROM messages WHERE chat_id=chat_threads.id
+                     ORDER BY id DESC LIMIT 1) AS last_at,
+                   (SELECT COUNT(*) FROM messages
+                     WHERE chat_id=chat_threads.id AND sender_id<>?
+                       AND (chat_members.last_read_at IS NULL
+                            OR messages.created_at > chat_members.last_read_at))
+                       AS unread,
+                   (SELECT COUNT(*) FROM messages WHERE chat_id=chat_threads.id) AS total,
+                   (SELECT COUNT(*) FROM chat_members cm
+                     WHERE cm.chat_id=chat_threads.id) AS member_count
+            FROM chat_threads
+            JOIN chat_members ON chat_members.chat_id = chat_threads.id
+            WHERE chat_members.user_id=?
+            ORDER BY COALESCE(chat_threads.last_message_at, chat_threads.created_at) DESC,
+                     chat_threads.id DESC
+            LIMIT {int(limit)}
+        """, user["id"], user["id"])
+    except Exception as exc:
+        app.logger.warning("Could not read group hangouts: %s", exc)
+        return []
+    return rows
+
+
+def unread_chat_messages(user):
+    if not user or not gplus3_schema():
+        return 0
+    row = safe_first("""
+        SELECT COUNT(*) AS unread
+        FROM messages JOIN chat_members ON chat_members.chat_id = messages.chat_id
+        WHERE chat_members.user_id=? AND messages.sender_id<>?
+          AND (chat_members.last_read_at IS NULL
+               OR messages.created_at > chat_members.last_read_at)
+    """, user["id"], user["id"])
+    return int(row["unread"]) if row else 0
+
+
+def touch_chat(chat_id):
+    safe_execute(
+        "UPDATE chat_threads SET last_message_at=datetime('now') WHERE id=?", chat_id
+    )
+
+
+def open_group_chat(creator, title, member_ids):
+    """Create a group thread with ``creator`` as owner and the given members."""
+    if not gplus3_schema():
+        return None
+    safe_execute(
+        "INSERT INTO chat_threads (title, created_by) VALUES (?, ?)",
+        title, creator["id"],
+    )
+    created = safe_first("SELECT last_insert_rowid() AS id")
+    if not created:
+        return None
+    chat_id = created["id"]
+    safe_execute(
+        "INSERT OR IGNORE INTO chat_members (chat_id, user_id, role, last_read_at)"
+        " VALUES (?, ?, 'owner', datetime('now'))",
+        chat_id, creator["id"],
+    )
+    for user_id in member_ids:
+        if user_id and user_id != creator["id"]:
+            safe_execute(
+                "INSERT OR IGNORE INTO chat_members (chat_id, user_id, role)"
+                " VALUES (?, ?, 'member')",
+                chat_id, user_id,
+            )
+    return chat_by_id(chat_id)
+
+
+def send_chat_message(chat, sender, body, attachment=None):
+    """Write one group message; the sender is its own recipient (schema 0014)."""
+    if not chat or not gplus3_schema():
+        return None
+    message_id = send_message(
+        sender["id"], "", body, sender=sender, kind="message",
+        chat_id=chat["id"], attachment=attachment,
+    )
+    if message_id:
+        safe_execute(
+            "UPDATE chat_members SET last_read_at=datetime('now')"
+            " WHERE chat_id=? AND user_id=?", chat["id"], sender["id"],
+        )
+    return message_id
+
+
+def mark_chat_read(chat, user):
+    if not chat or not user or not gplus3_schema():
+        return
+    safe_execute(
+        "UPDATE chat_members SET last_read_at=datetime('now')"
+        " WHERE chat_id=? AND user_id=?", chat["id"], user["id"],
+    )
+
+
+def chat_messages(chat_id, limit=CONVERSATION_PAGE_MESSAGES):
+    try:
+        return query(
+            """SELECT messages.*, users.username AS sender_username,
+                      users.display_name AS sender_display_name,
+                      users.profile_picture AS sender_picture,
+                      users.user_id AS sender_public_id,
+                      users.deleted_at AS sender_deleted
+                 FROM messages LEFT JOIN users ON users.id = messages.sender_id
+                WHERE messages.chat_id=? ORDER BY messages.id LIMIT ?""",
+            chat_id, limit,
+        )
+    except Exception as exc:
+        app.logger.warning("Could not read group chat %s: %s", chat_id, exc)
+        return []
 
 
 def user_by_id(user_id):
@@ -1341,15 +1566,17 @@ def mark_conversation_read(conversation, reader_ids):
         app.logger.warning("Could not mark a conversation read: %s", exc)
 
 
-def send_direct_message(conversation, sender, body):
+def send_direct_message(conversation, sender, body, attachment=None):
     """Write one chat message into a thread, as ``sender``.
 
     No subject and no moderation context: this is a person typing at another
-    person, and the thread is the subject.
+    person, and the thread is the subject. ``attachment`` is an uploads filename
+    shown as a picture in the bubble.
     """
     return send_message(
         conversation_other_id(conversation, sender["id"]), "", body,
         sender=sender, kind="message", conversation_id=conversation["id"],
+        attachment=attachment,
     )
 
 
@@ -1763,6 +1990,9 @@ def fetch_posts(where="", params=(), limit=None, order="posts.created_at DESC"):
             "pages.avatar AS page_avatar",
         ])
         extra_joins += "\n        LEFT JOIN pages ON pages.id = posts.page_id"
+    if gplus3_schema():
+        extra.extend(["polls.id AS poll_id"])
+        extra_joins += "\n        LEFT JOIN polls ON polls.post_id = posts.id"
     extra_sql = ""
     if extra:
         extra_sql = ",\n               " + ",\n               ".join(extra)
@@ -1984,6 +2214,19 @@ def comment_threads(post_id, viewer_id=0):
         WHERE comments.post_id=?
         ORDER BY comments.created_at ASC
     """, *params)
+    # Every comment's pictures in one query rather than one per comment: a post
+    # with thirty comments would otherwise be thirty extra D1 round trips.
+    images_by_comment = {}
+    if gplus3_schema() and rows:
+        placeholders = ",".join("?" for _ in rows)
+        for image in safe_query(
+            f"SELECT * FROM comment_images WHERE comment_id IN ({placeholders})"
+            " ORDER BY position, id",
+            *[row["id"] for row in rows],
+        ):
+            images_by_comment.setdefault(image["comment_id"], []).append(image)
+    for row in rows:
+        row["images"] = images_by_comment.get(row["id"], [])
     by_id = {row["id"]: row for row in rows}
     threads = []
     for row in rows:
@@ -2155,7 +2398,7 @@ def circle_for_post(item):
 
 # Notifications -----------------------------------------------------------------
 
-def notify(user_id, kind, actor_id=None, post_id=None, comment_id=None):
+def notify(user_id, kind, actor_id=None, post_id=None, comment_id=None, link=None):
     """Tell ``user_id`` that ``actor_id`` did ``kind`` to something of theirs.
 
     Skips the actor's own actions (nobody wants a bell for liking their own
@@ -2184,11 +2427,18 @@ def notify(user_id, kind, actor_id=None, post_id=None, comment_id=None):
         recipient = safe_first("SELECT * FROM users WHERE id=?", user_id)
         if recipient and not notification_prefs(recipient).get(kind, True):
             return False
-    inserted = safe_execute(
-        "INSERT INTO notifications (user_id, kind, actor_id, post_id, comment_id)"
-        " VALUES (?, ?, ?, ?, ?)",
-        user_id, kind, actor_id, post_id, comment_id,
-    )
+    if gplus3_schema():
+        inserted = safe_execute(
+            "INSERT INTO notifications (user_id, kind, actor_id, post_id, comment_id, link)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            user_id, kind, actor_id, post_id, comment_id, link,
+        )
+    else:
+        inserted = safe_execute(
+            "INSERT INTO notifications (user_id, kind, actor_id, post_id, comment_id)"
+            " VALUES (?, ?, ?, ?, ?)",
+            user_id, kind, actor_id, post_id, comment_id,
+        )
     if inserted and recipient is not None and actor_id:
         actor = safe_first(
             "SELECT display_name, username FROM users WHERE id=?", actor_id
@@ -2268,11 +2518,25 @@ def notification_text(row):
         return f"{actor} +1'd your comment"
     if kind == "tag":
         return f"{actor} tagged you in a post"
+    if kind == "community":
+        return f"{actor} posted in a community you moderate"
+    if kind == "community_join":
+        return f"{actor} asked to join your community"
+    if kind == "event":
+        return f"{actor} invited you to an event"
+    if kind == "hangout":
+        return f"{actor} invited you to a Hangout"
+    if kind == "page":
+        return f"{actor} started following your Page"
+    if kind == "tag_post":
+        return f"{actor} posted with a tag you follow"
     return f"{actor} did something on your post"
 
 
 def notification_url(row):
-    """Where a notification goes: the post, the comment, or the actor."""
+    """Where a notification goes: its own link, the post, the comment, or the actor."""
+    if row.get("link"):
+        return row["link"]
     if row.get("post_public_id"):
         post_row = {"public_id": row["post_public_id"],
                     "author_public_id": row.get("actor_public_id") or row.get("post_user_id")}
@@ -2417,11 +2681,34 @@ def collection_by_id(collection_id):
 
 # Communities ---------------------------------------------------------------------
 
-def community_rows(viewer_id=0):
+def community_rows(viewer_id=0, category=""):
     """Every community, newest first, with member and post counts."""
     if not gplus_schema():
         return []
-    return safe_query("""
+    where = ""
+    params = [viewer_id, viewer_id]
+    if category:
+        where = "WHERE communities.category=?"
+        params.append(category)
+    active = "status='active'" if gplus3_schema() else "1"
+    return safe_query(f"""
+        SELECT communities.*,
+               users.username AS owner_username,
+               users.display_name AS owner_name,
+               (SELECT COUNT(*) FROM community_members
+                 WHERE community_id=communities.id AND {active}) AS member_count,
+               (SELECT COUNT(*) FROM posts
+                 WHERE community_id=communities.id
+                   AND status='published') AS post_count,
+               (SELECT role FROM community_members
+                 WHERE community_id=communities.id AND user_id=?) AS my_role,
+               (SELECT status FROM community_members
+                 WHERE community_id=communities.id AND user_id=?) AS my_status
+        FROM communities
+        JOIN users ON users.id = communities.owner_id
+        {where}
+        ORDER BY communities.created_at DESC, communities.id DESC
+    """, *params) if gplus3_schema() else safe_query(f"""
         SELECT communities.*,
                users.username AS owner_username,
                users.display_name AS owner_name,
@@ -2431,22 +2718,25 @@ def community_rows(viewer_id=0):
                  WHERE community_id=communities.id
                    AND status='published') AS post_count,
                (SELECT role FROM community_members
-                 WHERE community_id=communities.id AND user_id=?) AS my_role
+                 WHERE community_id=communities.id AND user_id=?) AS my_role,
+               NULL AS my_status
         FROM communities
         JOIN users ON users.id = communities.owner_id
+        {where}
         ORDER BY communities.created_at DESC, communities.id DESC
-    """, viewer_id)
+    """, viewer_id, *([category] if category else []))
 
 
 def communities_for(user_id):
     """The communities an account belongs to, for the editor's picker."""
     if not user_id or not gplus_schema():
         return []
-    return safe_query("""
+    active = "AND community_members.status='active'" if gplus3_schema() else ""
+    return safe_query(f"""
         SELECT communities.*, community_members.role
         FROM community_members
         JOIN communities ON communities.id = community_members.community_id
-        WHERE community_members.user_id=?
+        WHERE community_members.user_id=? {active}
         ORDER BY communities.name COLLATE NOCASE
     """, user_id)
 
@@ -2462,6 +2752,76 @@ def community_membership(community_id, user_id):
         "SELECT * FROM community_members WHERE community_id=? AND user_id=?",
         community_id, user_id,
     )
+
+
+def community_member_rows(community_id, status="active", limit=200):
+    if not community_id or not gplus_schema():
+        return []
+    if status not in ("active", "pending"):
+        status = "active"
+    condition = "AND community_members.status=?" if gplus3_schema() else ""
+    params = [community_id]
+    if condition:
+        params.append(status)
+    return safe_query(f"""
+        SELECT users.id, users.username, users.display_name, users.profile_picture,
+               users.deleted_at, community_members.role, community_members.joined_at
+        FROM community_members JOIN users ON users.id = community_members.user_id
+        WHERE community_members.community_id=? {condition}
+        ORDER BY community_members.joined_at LIMIT {int(limit)}
+    """, *params)
+
+
+def community_moderator_ids(community_id):
+    """Owner and moderators: the people a community notification goes to."""
+    if not community_id or not gplus_schema():
+        return []
+    role_condition = "role IN ('owner', 'moderator')"
+    status_condition = "AND status='active'" if gplus3_schema() else ""
+    return [row["user_id"] for row in safe_query(
+        f"SELECT user_id FROM community_members"
+        f" WHERE community_id=? AND {role_condition} {status_condition}",
+        community_id,
+    )]
+
+
+def community_can_moderate(community, user):
+    if not community or not user or not gplus_schema():
+        return False
+    if community["owner_id"] == user["id"]:
+        return True
+    membership = community_membership(community["id"], user["id"])
+    if not membership or membership.get("role") not in ("owner", "moderator"):
+        return False
+    return membership.get("status", "active") == "active"
+
+
+def community_events(community_id, limit=6):
+    if not community_id or not gplus3_schema():
+        return []
+    return safe_query(f"""
+        SELECT * FROM events WHERE community_id=?
+        ORDER BY starts_at LIMIT {int(limit)}
+    """, community_id)
+
+
+def community_reports(community_id):
+    """Open reports on this community's posts and comments."""
+    if not community_id or not gplus3_schema():
+        return []
+    return safe_query("""
+        SELECT reports.*, reporter.username AS reporter_username,
+               posts.id AS post_id, posts.title AS post_title,
+               posts.public_id AS post_public_id,
+               comments.id AS comment_id, comments.content AS comment_content
+        FROM reports
+        LEFT JOIN users reporter ON reporter.id = reports.reporter_id
+        LEFT JOIN posts ON posts.id = COALESCE(reports.post_id,
+            (SELECT post_id FROM comments WHERE comments.id = reports.comment_id))
+        LEFT JOIN comments ON comments.id = reports.comment_id
+        WHERE reports.resolved_at IS NULL AND posts.community_id=?
+        ORDER BY reports.id DESC LIMIT 50
+    """, community_id)
 
 
 # Events --------------------------------------------------------------------------
@@ -2493,6 +2853,53 @@ def event_attendance(event_id, user_id):
     )
 
 
+def event_invites(event_id, limit=100):
+    if not event_id or not gplus3_schema():
+        return []
+    return safe_query(f"""
+        SELECT users.id, users.username, users.display_name, users.profile_picture
+        FROM event_invites JOIN users ON users.id = event_invites.user_id
+        WHERE event_invites.event_id=?
+        ORDER BY event_invites.created_at LIMIT {int(limit)}
+    """, event_id)
+
+
+def event_invited(event_id, user_id):
+    if not event_id or not user_id or not gplus3_schema():
+        return False
+    return bool(safe_first(
+        "SELECT 1 FROM event_invites WHERE event_id=? AND user_id=?",
+        event_id, user_id,
+    ))
+
+
+def ics_escape(value):
+    return (str(value or "").replace("\\", "\\\\").replace(";", "\\;")
+            .replace(",", "\\,").replace("\n", "\\n"))
+
+
+def event_calendar(event_row):
+    """A single-event .ics file, so an RSVP can be put in a real calendar."""
+    starts = (event_row.get("starts_at") or "").replace("-", "").replace(":", "")
+    starts = starts.replace(" ", "T") + "00"
+    try:
+        end_dt = datetime.strptime(event_row["starts_at"], "%Y-%m-%d %H:%M") + timedelta(hours=2)
+        ends = end_dt.strftime("%Y%m%dT%H%M00")
+    except (KeyError, TypeError, ValueError):
+        ends = starts
+    lines = [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Systematics Black MIDI//Events//EN",
+        "BEGIN:VEVENT",
+        f"UID:event-{event_row['id']}@systematics-bm.systematic-midis.workers.dev",
+        f"DTSTART:{starts}", f"DTEND:{ends}",
+        f"SUMMARY:{ics_escape(event_row.get('title'))}",
+        f"DESCRIPTION:{ics_escape(event_row.get('description'))}",
+        f"LOCATION:{ics_escape(event_row.get('location'))}",
+        "END:VEVENT", "END:VCALENDAR", "",
+    ]
+    return "\r\n".join(lines)
+
+
 # Photos and media ----------------------------------------------------------------
 
 def post_image_rows(post_id):
@@ -2502,6 +2909,28 @@ def post_image_rows(post_id):
     return safe_query(
         "SELECT * FROM post_images WHERE post_id=? ORDER BY position, id", post_id
     )
+
+
+def comment_images_of(comment_id):
+    if not comment_id or not gplus3_schema():
+        return []
+    return safe_query(
+        "SELECT * FROM comment_images WHERE comment_id=? ORDER BY position, id",
+        comment_id,
+    )
+
+
+def delete_comment_uploads(comment_id):
+    """Take a comment's pictures with it; nothing else references those bytes."""
+    for image in comment_images_of(comment_id):
+        delete_upload(image["filename"])
+    if comment_id and gplus3_schema():
+        safe_execute("DELETE FROM comment_images WHERE comment_id=?", comment_id)
+
+
+@app.template_global()
+def comment_pictures(comment_id):
+    return comment_images_of(comment_id)
 
 
 def post_people_rows(post_id):
@@ -2615,6 +3044,20 @@ def gplus2_schema():
     return g.gplus2_schema
 
 
+def gplus3_schema():
+    """True once migration 0018 is applied (and 0016/0017 beneath it)."""
+    if "gplus3_schema" not in g:
+        if not gplus2_schema():
+            g.gplus3_schema = False
+        else:
+            try:
+                first("SELECT 1 FROM chat_threads LIMIT 1")
+                g.gplus3_schema = True
+            except Exception:
+                g.gplus3_schema = False
+    return g.gplus3_schema
+
+
 # Muting a person ---------------------------------------------------------------
 def muted_ids(user_id):
     """Accounts ``user_id`` has muted. Muted posts leave the streams, not the site."""
@@ -2692,6 +3135,23 @@ def email_configured():
     return bool(cfg["url"] and cfg["key"] and cfg["from"])
 
 
+def enqueue_email(address, kind, subject, body, recipient_id=None):
+    """Queue one email regardless of the digest setting.
+
+    Used by account mail (password reset, address verification), which is not a
+    notification and must not be suppressed by a notification preference. A
+    missing migration or address is a quiet no-op, never a failed request.
+    """
+    address = (address or "").strip()
+    if not address or not gplus3_schema():
+        return False
+    return safe_execute(
+        "INSERT INTO email_outbox (recipient_id, to_address, kind, subject, body)"
+        " VALUES (?, ?, ?, ?, ?)",
+        recipient_id, address, kind, subject[:200], body,
+    )
+
+
 def queue_email(recipient, kind, subject, body):
     """Put one digest line in the outbox for an account that asked for email."""
     if not gplus2_schema() or not recipient:
@@ -2699,11 +3159,136 @@ def queue_email(recipient, kind, subject, body):
     address = (recipient.get("email") or "").strip()
     if not address or not recipient.get("email_digest"):
         return False
-    return safe_execute(
-        "INSERT INTO email_outbox (recipient_id, to_address, kind, subject, body)"
-        " VALUES (?, ?, ?, ?, ?)",
-        recipient["id"], address, kind, subject, body,
+    return enqueue_email(address, kind, subject, body, recipient["id"])
+
+
+def token_digest(token):
+    """The SHA-256 of a mailed token. Only this hash is ever stored."""
+    return hashlib.sha256((token or "").encode()).hexdigest()
+
+
+def new_mailed_token():
+    return secrets.token_urlsafe(32)
+
+
+def create_password_reset(user):
+    """A raw reset token, with its hash and a one-hour expiry stored instead."""
+    if not gplus3_schema():
+        return None
+    token = new_mailed_token()
+    expires = (utcnow() + timedelta(minutes=RESET_TOKEN_MINUTES)).strftime(DB_TIME_FORMAT)
+    inserted = safe_execute(
+        "INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+        user["id"], token_digest(token), expires,
     )
+    return token if inserted else None
+
+
+def password_reset_row(token):
+    if not token or not gplus3_schema():
+        return None
+    return safe_first(
+        "SELECT * FROM password_resets WHERE token_hash=? AND used_at IS NULL"
+        " AND expires_at > datetime('now')",
+        token_digest(token),
+    )
+
+
+def create_email_verification(user, email):
+    if not gplus3_schema():
+        return None
+    token = new_mailed_token()
+    expires = (utcnow() + timedelta(hours=VERIFY_TOKEN_HOURS)).strftime(DB_TIME_FORMAT)
+    inserted = safe_execute(
+        "INSERT INTO email_verifications (user_id, email, token_hash, expires_at)"
+        " VALUES (?, ?, ?, ?)",
+        user["id"], email, token_digest(token), expires,
+    )
+    return token if inserted else None
+
+
+def email_verification_row(token):
+    if not token or not gplus3_schema():
+        return None
+    return safe_first(
+        "SELECT * FROM email_verifications WHERE token_hash=? AND used_at IS NULL"
+        " AND expires_at > datetime('now')",
+        token_digest(token),
+    )
+
+
+# Two-factor authentication -------------------------------------------------------
+
+def totp_at(secret, counter):
+    """The six-digit TOTP for one time step, or None for an unusable secret."""
+    raw = (secret or "").strip().upper().replace(" ", "")
+    if not raw:
+        return None
+    padding = "=" * ((8 - len(raw) % 8) % 8)
+    try:
+        key = base64.b32decode(raw + padding)
+    except Exception:
+        return None
+    digest = hmac.new(key, struct.pack(">Q", int(counter)), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    value = struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF
+    return f"{value % (10 ** TOTP_DIGITS):0{TOTP_DIGITS}d}"
+
+
+def totp_now(secret):
+    return totp_at(secret, int(time.time()) // TOTP_STEP_SECONDS)
+
+
+def verify_totp(secret, code):
+    """Check a code, allowing one step either side for a slow phone clock."""
+    code = re.sub(r"\D", "", code or "")
+    if len(code) != TOTP_DIGITS:
+        return False
+    counter = int(time.time()) // TOTP_STEP_SECONDS
+    for offset in (-1, 0, 1):
+        expected = totp_at(secret, counter + offset)
+        if expected and hmac.compare_digest(expected, code):
+            return True
+    return False
+
+
+def new_totp_secret():
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def totp_uri(secret, username):
+    label = urllib.parse.quote(f"Systematics Black MIDI:{username}", safe="")
+    return (f"otpauth://totp/{label}?secret={secret}&issuer="
+            f"{urllib.parse.quote('Systematics Black MIDI', safe='')}"
+            f"&digits={TOTP_DIGITS}&period={TOTP_STEP_SECONDS}")
+
+
+def new_recovery_codes():
+    return [f"{secrets.token_hex(2)}-{secrets.token_hex(2)}" for _ in range(RECOVERY_CODE_COUNT)]
+
+
+def hash_recovery_codes(codes):
+    return json.dumps([token_digest(code.replace("-", "").lower()) for code in codes])
+
+
+def use_recovery_code(user, code):
+    """Consume one recovery code; returns True when it matched."""
+    if not user or not user.get("totp_recovery"):
+        return False
+    try:
+        hashes = json.loads(user["totp_recovery"])
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(hashes, list):
+        return False
+    digest = token_digest(re.sub(r"[^a-zA-Z0-9]", "", code or "").lower())
+    if digest not in hashes:
+        return False
+    hashes.remove(digest)
+    safe_execute(
+        "UPDATE users SET totp_recovery=? WHERE id=?", json.dumps(hashes), user["id"]
+    )
+    return True
 
 
 def pending_email_count():
@@ -2838,6 +3423,52 @@ def page_posts(page, viewer_id=None, limit=40):
     )
 
 
+def page_follower_count(page_id):
+    if not page_id or not gplus3_schema():
+        return 0
+    row = safe_first(
+        "SELECT COUNT(*) AS total FROM page_follows WHERE page_id=?", page_id
+    )
+    return int(row["total"]) if row else 0
+
+
+def is_following_page(page_id, user_id):
+    if not page_id or not user_id or not gplus3_schema():
+        return False
+    return bool(safe_first(
+        "SELECT 1 FROM page_follows WHERE page_id=? AND user_id=?",
+        page_id, user_id,
+    ))
+
+
+def page_follower_rows(page_id, limit=40):
+    if not page_id or not gplus3_schema():
+        return []
+    return safe_query(f"""
+        SELECT users.id, users.username, users.display_name, users.profile_picture,
+               users.bio, users.deleted_at
+        FROM page_follows JOIN users ON users.id = page_follows.user_id
+        WHERE page_follows.page_id=?
+        ORDER BY page_follows.created_at DESC LIMIT {int(limit)}
+    """, page_id)
+
+
+def page_insight_stats(page_id):
+    """The numbers a Page owner can see, in one round trip."""
+    if not page_id or not gplus3_schema():
+        return {}
+    return safe_first("""
+        SELECT (SELECT COUNT(*) FROM posts WHERE page_id=? AND status='published') AS posts,
+               (SELECT COUNT(*) FROM page_follows WHERE page_id=?) AS followers,
+               (SELECT COALESCE(SUM(value), 0) FROM post_votes
+                 WHERE post_id IN (SELECT id FROM posts WHERE page_id=?)) AS score,
+               (SELECT COUNT(*) FROM comments
+                 WHERE post_id IN (SELECT id FROM posts WHERE page_id=?)) AS comments,
+               (SELECT COUNT(*) FROM shares
+                 WHERE post_id IN (SELECT id FROM posts WHERE page_id=?)) AS shares
+    """, page_id, page_id, page_id, page_id, page_id)
+
+
 # Albums -------------------------------------------------------------------------
 def albums_for(user_id, viewer_id=0):
     """An account's albums with their post counts; empty ones are private."""
@@ -2904,9 +3535,76 @@ def hangout_by_id(hangout_id):
     return safe_first("SELECT * FROM hangouts WHERE id=?", hangout_id)
 
 
+def hangout_invite_rows(hangout_id, limit=100):
+    if not hangout_id or not gplus3_schema():
+        return []
+    return safe_query(f"""
+        SELECT users.id, users.username, users.display_name, users.profile_picture
+        FROM hangout_invites JOIN users ON users.id = hangout_invites.user_id
+        WHERE hangout_invites.hangout_id=?
+        ORDER BY hangout_invites.created_at LIMIT {int(limit)}
+    """, hangout_id)
+
+
+def hangout_invited(hangout_id, user_id):
+    if not hangout_id or not user_id or not gplus3_schema():
+        return False
+    return bool(safe_first(
+        "SELECT 1 FROM hangout_invites WHERE hangout_id=? AND user_id=?",
+        hangout_id, user_id,
+    ))
+
+
+def invite_to_hangout(hangout, inviter, person):
+    """Put somebody on a room's invite list and ring their bell."""
+    if not hangout or not person or not gplus3_schema():
+        return False
+    inserted = safe_execute(
+        "INSERT OR IGNORE INTO hangout_invites (hangout_id, user_id, invited_by)"
+        " VALUES (?, ?, ?)",
+        hangout["id"], person["id"], inviter["id"] if inviter else None,
+    )
+    if inserted:
+        notify(
+            person["id"], "hangout", inviter["id"] if inviter else None,
+            link=url_for("hangout", room=hangout["room"]),
+        )
+    return inserted
+
+
 def jitsi_room_name():
     """A room nobody can guess, on Jitsi's free public service."""
     return "SystematicsBM-" + secrets.token_hex(8)
+
+
+def create_call_room(owner, title, participants, conversation_id=None, chat_id=None):
+    """A Jitsi room for a DM or group, with everybody invited.
+
+    Used by the "Start a Hangout" button inside a chat. The room is an ordinary
+    row in `hangouts`, so the same screen, ending it and the invites work here.
+    """
+    if not gplus2_schema():
+        return None
+    room = jitsi_room_name()
+    if gplus3_schema():
+        execute(
+            "INSERT INTO hangouts (owner_id, title, room, kind, conversation_id, chat_id)"
+            " VALUES (?, ?, ?, 'hangout', ?, ?)",
+            owner["id"], title[:MAX_HANGOUT_TITLE], room, conversation_id, chat_id,
+        )
+    else:
+        execute(
+            "INSERT INTO hangouts (owner_id, title, room, kind)"
+            " VALUES (?, ?, ?, 'hangout')",
+            owner["id"], title[:MAX_HANGOUT_TITLE], room,
+        )
+    created = safe_first("SELECT * FROM hangouts WHERE room=?", room)
+    if not created:
+        return None
+    for person in participants:
+        if person and person["id"] != owner["id"]:
+            invite_to_hangout(created, owner, person)
+    return created
 
 
 # Sparks --------------------------------------------------------------------------
@@ -3399,6 +4097,20 @@ app.jinja_env.globals["DELETED_ACCOUNT_NAME"] = DELETED_ACCOUNT_NAME
 # Templates word the same limits the routes enforce, so a box and its error
 # message cannot drift apart.
 app.jinja_env.globals["MAX_DM_LENGTH"] = MAX_DM_LENGTH
+# Account recovery, polls, communities and group Hangouts word their own limits
+# from the same constants the routes enforce.
+app.jinja_env.globals["RESET_TOKEN_MINUTES"] = RESET_TOKEN_MINUTES
+app.jinja_env.globals["VERIFY_TOKEN_HOURS"] = VERIFY_TOKEN_HOURS
+app.jinja_env.globals["MAX_POLL_OPTIONS"] = MAX_POLL_OPTIONS
+app.jinja_env.globals["MAX_POLL_OPTION_LENGTH"] = MAX_POLL_OPTION_LENGTH
+app.jinja_env.globals["MAX_CHAT_TITLE"] = MAX_CHAT_TITLE
+app.jinja_env.globals["MAX_CHAT_MEMBERS"] = MAX_CHAT_MEMBERS
+app.jinja_env.globals["MAX_COMMUNITY_NAME"] = MAX_COMMUNITY_NAME
+app.jinja_env.globals["MAX_COMMUNITY_DESCRIPTION"] = MAX_COMMUNITY_DESCRIPTION
+app.jinja_env.globals["MAX_COMMUNITY_RULES"] = MAX_COMMUNITY_RULES
+app.jinja_env.globals["MAX_COMMENT_IMAGES"] = MAX_COMMENT_IMAGES
+app.jinja_env.globals["COMMUNITY_CATEGORIES"] = COMMUNITY_CATEGORIES
+app.jinja_env.globals["COMMUNITY_JOIN_POLICIES"] = COMMUNITY_JOIN_POLICIES
 app.jinja_env.globals["MESSAGE_PREVIEW_LENGTH"] = MESSAGE_PREVIEW_LENGTH
 app.jinja_env.globals["MODERATION_USERNAME_DEFAULT"] = MODERATION_USERNAME_DEFAULT
 app.jinja_env.globals["is_moderation_account"] = is_moderation_account
@@ -3734,6 +4446,7 @@ def home():
     visitor sees their own drafts nowhere - drafts are opened by URL - but does
     see circle posts addressed to a circle they are in.
     """
+    publish_due_posts()
     feed = request.args.get("feed", "")
     category = request.args.get("category", "")
     if category not in POST_CATEGORIES:
@@ -3752,10 +4465,17 @@ def home():
             return redirect(url_for("login", next=url_for("home", feed="following")))
         # Your own posts belong in your stream too, the way they did on Google+.
         where += (
-            " AND posts.user_id IN (SELECT followed_id FROM follows"
+            " AND (posts.user_id IN (SELECT followed_id FROM follows"
             " WHERE follower_id=? UNION SELECT ?)"
         )
         params.extend([viewer_id, viewer_id])
+        if gplus3_schema():
+            where += (
+                " OR posts.page_id IN (SELECT page_id FROM page_follows"
+                " WHERE user_id=?)"
+            )
+            params.append(viewer_id)
+        where += ")"
     elif feed == "incoming":
         category = ""
         if not viewer_id:
@@ -3890,6 +4610,133 @@ def post_legacy(post_id):
     return render_post_page(item)
 
 
+# Scheduling, polls and tag follows ---------------------------------------------
+
+def publish_due_posts():
+    """Publish anything whose scheduled time has arrived.
+
+    Called by the streams rather than by a Cron trigger: a scheduled post is due
+    when somebody next reads the site, which needs no paid scheduler and cannot
+    silently stop working if a trigger is removed.
+    """
+    if not gplus3_schema():
+        return
+    safe_execute(
+        "UPDATE posts SET status='published'"
+        " WHERE status='scheduled' AND publish_at IS NOT NULL"
+        " AND publish_at <= datetime('now')"
+    )
+
+
+def save_poll(post_id, raw_options):
+    """Create, replace or remove the poll attached to a post.
+
+    Fewer than two non-empty lines means there is no poll, which is also how an
+    edit removes one. Replacing the choices clears the votes they carried.
+    """
+    if not gplus3_schema() or not post_id:
+        return
+    labels = [
+        line.strip()[:MAX_POLL_OPTION_LENGTH]
+        for line in (raw_options or "").splitlines() if line.strip()
+    ][:MAX_POLL_OPTIONS]
+    existing = safe_first("SELECT * FROM polls WHERE post_id=?", post_id)
+    if len(labels) < 2:
+        if existing:
+            safe_execute("DELETE FROM polls WHERE id=?", existing["id"])
+        return
+    poll_id = existing["id"] if existing else None
+    if existing:
+        safe_execute("DELETE FROM poll_options WHERE poll_id=?", poll_id)
+    else:
+        safe_execute("INSERT INTO polls (post_id) VALUES (?)", post_id)
+        created = safe_first("SELECT id FROM polls WHERE post_id=?", post_id)
+        poll_id = created["id"] if created else None
+    if not poll_id:
+        return
+    for position, label in enumerate(labels):
+        safe_execute(
+            "INSERT INTO poll_options (poll_id, label, position) VALUES (?, ?, ?)",
+            poll_id, label, position,
+        )
+
+
+def poll_for_post(post_id):
+    """One post's poll with every choice, its votes and the viewer's own vote."""
+    if not post_id or not gplus3_schema():
+        return None
+    poll = safe_first("SELECT * FROM polls WHERE post_id=?", post_id)
+    if not poll:
+        return None
+    viewer_id = session.get("user_db_id") or 0
+    options = safe_query("""
+        SELECT poll_options.*,
+               (SELECT COUNT(*) FROM poll_votes
+                 WHERE poll_votes.option_id=poll_options.id) AS votes
+        FROM poll_options WHERE poll_id=? ORDER BY position, id
+    """, poll["id"])
+    my_vote = safe_first(
+        "SELECT option_id FROM poll_votes WHERE poll_id=? AND user_id=?",
+        poll["id"], viewer_id,
+    )
+    total = sum(int(row["votes"] or 0) for row in options)
+    for row in options:
+        row["percent"] = round((int(row["votes"] or 0) * 100) / total) if total else 0
+    return {
+        "poll": poll, "options": options, "total": total,
+        "my_option": (my_vote or {}).get("option_id"),
+    }
+
+
+@app.template_global()
+def poll_of(post_id):
+    return poll_for_post(post_id)
+
+
+@app.post("/post/<int:post_id>/poll")
+@login_required
+def vote_poll(post_id):
+    item = post_row(post_id)
+    if not item or not may_view(item):
+        abort(404)
+    if not gplus3_schema():
+        abort(404)
+    poll = safe_first("SELECT * FROM polls WHERE post_id=?", post_id)
+    option_id = request.form.get("option_id", "")
+    option = safe_first(
+        "SELECT * FROM poll_options WHERE id=? AND poll_id=?",
+        int(option_id) if option_id.isdigit() else 0,
+        poll["id"] if poll else 0,
+    )
+    if poll and option:
+        safe_execute(
+            "INSERT INTO poll_votes (poll_id, option_id, user_id) VALUES (?, ?, ?)"
+            " ON CONFLICT(poll_id, user_id) DO UPDATE SET option_id=excluded.option_id,"
+            " created_at=datetime('now')",
+            poll["id"], option["id"], current_user()["id"],
+        )
+    return redirect(post_path(post_id) + "#poll")
+
+
+def notify_tag_followers(post_id, actor):
+    """Ring the bell of everybody following a tag this post carries."""
+    if not post_id or not actor or not gplus3_schema():
+        return
+    tags = [row["tag"] for row in safe_query(
+        "SELECT tag FROM post_tags WHERE post_id=?", post_id
+    )]
+    if not tags:
+        return
+    placeholders = ",".join("?" for _ in tags)
+    rows = safe_query(
+        f"SELECT DISTINCT user_id FROM tag_follows WHERE tag IN ({placeholders})",
+        *tags,
+    )
+    for row in rows[:100]:
+        if row["user_id"] != actor["id"]:
+            notify(row["user_id"], "tag_post", actor["id"], post_id)
+
+
 def render_post_page(item):
     """The post page itself: the draft gate, the comment form and the render."""
     canonical = canonical_post_path(item)
@@ -3931,12 +4778,21 @@ def render_post_page(item):
         elif item.get("locked"):
             flash("The author has locked this post. No new comments can be added.", "error")
         else:
+            image, image_error = save_image_upload(request.files.get("image"))
+            if image_error:
+                flash(image_error, "error")
+                return redirect(canonical + "#comments")
             execute(
                 "INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)",
                 item["id"], commenter["id"], content, parent["id"] if parent else None,
             )
             created = first("SELECT last_insert_rowid() AS id")
             new_id = created["id"] if created else None
+            if image and new_id and gplus3_schema():
+                safe_execute(
+                    "INSERT INTO comment_images (comment_id, filename) VALUES (?, ?)",
+                    new_id, image,
+                )
             # Tell the people the comment is about: the post's author for a new
             # comment, the comment's author for a reply. A reply to your own
             # comment notifies nobody (notify() drops self-actions).
@@ -3974,6 +4830,21 @@ def render_post_page(item):
         albums=albums_for(item.get("user_id"), viewer_id),
         post_albums={row["id"] for row in post_album_rows(item["id"])},
         embed_url=url_for("embed_post", post_id=item["id"], _external=True),
+        # A poll is rendered by the page, not fetched per option by the template.
+        poll=poll_for_post(item["id"]),
+        share_circles=circle_rows(viewer_id),
+        can_pin_community=bool(
+            item.get("community_id") and gplus3_schema()
+            and community_can_moderate(
+                safe_first("SELECT * FROM communities WHERE id=?", item["community_id"]),
+                current_user(),
+            )
+        ),
+        revisions=safe_query(
+            "SELECT post_revisions.*, users.display_name AS editor_name"
+            " FROM post_revisions LEFT JOIN users ON users.id=post_revisions.edited_by"
+            " WHERE post_id=? ORDER BY id DESC LIMIT 20", item["id"],
+        ) if gplus3_schema() and can_manage_post(item) else [],
     )
 
 
@@ -4035,9 +4906,10 @@ def new_post():
         "post_editor.html",
         post=None,
         cancel_url=url_for("home"),
-        can_choose_status=is_admin(),
+        can_choose_status=True,
         can_choose_category=is_admin(),
         default_category=post_category_for(user["username"]),
+        poll_value="",
         circles=circle_rows(user["id"]),
         collections=collection_rows(user["id"], user["id"]),
         my_communities=communities_for(user["id"]),
@@ -4076,9 +4948,16 @@ def edit_post(post_id):
         "post_editor.html",
         post=item,
         cancel_url=post_path(post_id),
-        can_choose_status=is_admin(),
+        can_choose_status=True,
         can_choose_category=is_admin(),
         default_category=item["category"],
+        poll_value="\n".join(
+            row["label"] for row in safe_query(
+                "SELECT label FROM poll_options WHERE poll_id="
+                "(SELECT id FROM polls WHERE post_id=?) ORDER BY position, id",
+                item["id"],
+            )
+        ) if gplus3_schema() else "",
         circles=circle_rows(current_user()["id"]),
         collections=collection_rows(current_user()["id"], current_user()["id"]),
         my_communities=communities_for(current_user()["id"]),
@@ -4184,8 +5063,17 @@ def save_post(item=None):
         flash(f"Titles must be {MAX_POST_TITLE} characters or fewer.", "error")
         return None
     status = request.form.get("status", "published")
-    if status not in POST_STATUSES or not is_admin():
-        status = "published"  # drafts stay a site-owner tool
+    if status not in POST_STATUSES:
+        status = "published"
+    publish_at = request.form.get("publish_at", "").strip().replace("T", " ")
+    if status == "scheduled":
+        if not gplus3_schema():
+            status = "published"
+        elif not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", publish_at):
+            flash("Pick the date and time this post should publish.", "error")
+            return None
+    else:
+        publish_at = ""
     category = post_category_for(user["username"])
     if is_admin() and request.form.get("category") in POST_CATEGORIES:
         category = request.form["category"]
@@ -4287,6 +5175,14 @@ def save_post(item=None):
         post_id = created["id"]
     else:
         post_id = item["id"]
+        # Keep what the post said before an edit, so an update log or a disputed
+        # edit still has its history. Only real text changes are recorded.
+        if gplus3_schema() and (item.get("title") != title or item.get("content") != content):
+            safe_execute(
+                "INSERT INTO post_revisions (post_id, title, content, edited_by)"
+                " VALUES (?, ?, ?, ?)",
+                post_id, item.get("title") or "", item.get("content") or "", user["id"],
+            )
         execute(
             "UPDATE posts SET title=?, content=?, status=?, category=?, link_url=?,"
             " audience=?, circle_id=?, collection_id=?, community_id=?, event_id=?,"
@@ -4329,6 +5225,16 @@ def save_post(item=None):
             "UPDATE posts SET page_id=? WHERE id=?",
             page["id"] if page else None, post_id,
         )
+    if gplus3_schema():
+        safe_execute(
+            "UPDATE posts SET publish_at=? WHERE id=?", publish_at or None, post_id
+        )
+        save_poll(post_id, request.form.get("poll_options", ""))
+        if community:
+            for moderator_id in community_moderator_ids(community["id"]):
+                if moderator_id != user["id"]:
+                    notify(moderator_id, "community", user["id"], post_id)
+        notify_tag_followers(post_id, user)
 
     return post_path(post_id)
 
@@ -4362,8 +5268,7 @@ def register():
             user = create_account(
                 username, display_name, hash_password(password), picture
             )
-            session.clear()
-            session["user_db_id"] = user["id"]
+            start_session(user)
             if is_owner_username(username):
                 # The seeded welcome post stays authorless until an owner account
                 # exists; the first owner to register claims it (migration 0006 does
@@ -4405,15 +5310,23 @@ def login():
                 # The inbox needs a session and the ban is what removed it, so the
                 # notice is shown right here instead of being unreachable.
                 pending_notice = latest_ban_notice(user["id"], "account")
-            else:
+            elif user.get("totp_enabled") and gplus3_schema():
+                # The password is right but the second factor is still missing.
+                # Nothing is signed in yet; the pending id is short-lived session
+                # state, and /two-factor is the only route that reads it.
                 session.clear()
-                session["user_db_id"] = user["id"]
+                session["pending_2fa_user"] = user["id"]
+                session["pending_2fa_remember"] = bool(request.form.get("remember"))
+                session["pending_2fa_next"] = safe_next(
+                    request.form.get("next"), url_for("home")
+                )
+                return redirect(url_for("two_factor"))
+            else:
                 # "Remember me" is the only thing that gives the cookie an expiry
-                # date; without it the browser drops it when it closes. session.clear()
-                # above also discarded any previous choice, so this is set fresh each
-                # sign-in rather than inherited from the last one.
-                if request.form.get("remember"):
-                    session.permanent = True
+                # date; without it the browser drops it when it closes. Starting a
+                # fresh session also stores the epoch the account can end every
+                # other session with.
+                start_session(user, remember=bool(request.form.get("remember")))
                 return redirect(safe_next(request.form.get("next"), url_for("home")))
         else:
             flash("Invalid username or password.", "error")
@@ -4430,6 +5343,272 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("home"))
+
+
+# Account recovery, two-factor and verification ---------------------------------
+
+def email_is_verified(user):
+    return bool(user and user.get("email") and user.get("email_verified_at"))
+
+
+@app.route("/two-factor", methods=["GET", "POST"])
+def two_factor():
+    """The second step of signing in: an authenticator code or a recovery code."""
+    uid = session.get("pending_2fa_user")
+    if not uid:
+        flash("Sign in first.", "error")
+        return redirect(url_for("login"))
+    user = first("SELECT * FROM users WHERE id=?", uid)
+    if not user or not user.get("totp_enabled") or not gplus3_schema():
+        session.clear()
+        return redirect(url_for("login"))
+    error = None
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        if verify_totp(user.get("totp_secret"), code) or use_recovery_code(user, code):
+            remember = bool(session.get("pending_2fa_remember"))
+            target = session.get("pending_2fa_next") or url_for("home")
+            start_session(user, remember=remember)
+            flash("Signed in.", "success")
+            return redirect(target)
+        failures = int(session.get("pending_2fa_failures") or 0) + 1
+        session["pending_2fa_failures"] = failures
+        if failures >= 5:
+            session.clear()
+            flash("Too many wrong codes. Sign in again.", "error")
+            return redirect(url_for("login"))
+        error = "That code did not work. Check the clock on your phone and try again."
+    return render_template("two_factor.html", error=error)
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    """Ask for a reset link. The answer never says whether an account exists."""
+    if request.method == "POST":
+        address = request.form.get("email", "").strip()
+        if address and gplus3_schema():
+            user = first(
+                "SELECT * FROM users WHERE email=? COLLATE NOCASE AND deleted_at IS NULL",
+                address,
+            )
+            token = create_password_reset(user) if user else None
+            if token:
+                link = url_for("reset_password", token=token, _external=True)
+                enqueue_email(
+                    address, "password_reset",
+                    "Reset your Systematics Black MIDI password",
+                    "Somebody asked to reset the password for your account.\n\n"
+                    f"Open this link within {RESET_TOKEN_MINUTES} minutes:\n{link}\n\n"
+                    "If it was not you, ignore this email; the password is unchanged.",
+                    user["id"],
+                )
+        flash("If that address belongs to an account, a reset link is in its inbox."
+              " Ask the site owner if no mail provider is configured yet.", "success")
+        return redirect(url_for("login"))
+    return render_template("forgot_password.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    row = password_reset_row(token)
+    if not row:
+        flash("That reset link is invalid or has expired. Ask for a new one.", "error")
+        return redirect(url_for("forgot_password"))
+    user = user_by_id(row["user_id"])
+    if not user or user.get("deleted_at"):
+        flash("That account no longer exists.", "error")
+        return redirect(url_for("login"))
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+        if len(password) < 8:
+            flash("Password must be at least 8 characters.", "error")
+        elif password != confirm:
+            flash("Passwords do not match.", "error")
+        else:
+            safe_execute(
+                "UPDATE users SET password_hash=?, session_epoch=session_epoch+1"
+                " WHERE id=?", hash_password(password), user["id"],
+            )
+            safe_execute(
+                "UPDATE password_resets SET used_at=datetime('now') WHERE id=?",
+                row["id"],
+            )
+            flash("Your password has been changed. Sign in with the new one.", "success")
+            return redirect(url_for("login"))
+    return render_template("reset_password.html", token=token)
+
+
+@app.route("/verify-email/<token>")
+def verify_email(token):
+    row = email_verification_row(token)
+    if not row:
+        flash("That verification link is invalid or has expired.", "error")
+        return redirect(url_for("home"))
+    user = user_by_id(row["user_id"])
+    if user and (user.get("email") or "").lower() == (row["email"] or "").lower():
+        safe_execute(
+            "UPDATE users SET email_verified_at=datetime('now') WHERE id=?", user["id"]
+        )
+        safe_execute(
+            "UPDATE email_verifications SET used_at=datetime('now') WHERE id=?",
+            row["id"],
+        )
+        flash("Your email address is verified.", "success")
+    else:
+        flash("That address is no longer on the account, so it was not verified.", "error")
+    return redirect(url_for("notification_settings") if session.get("user_db_id")
+                    else url_for("home"))
+
+
+@app.route("/settings/account", methods=["GET", "POST"])
+@login_required
+def account_settings():
+    """Username, password, two-factor and every session, in one place."""
+    user = current_user()
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "username":
+            username = request.form.get("username", "").strip()
+            if is_owner_username(user["username"]):
+                flash("The site owner's handle is fixed; it identifies the owner.", "error")
+            elif not valid_username(username):
+                flash("Username must be 3-24 characters and use only letters, "
+                      "numbers, or underscores.", "error")
+            elif first("SELECT id FROM users WHERE username=? COLLATE NOCASE AND id<>?",
+                       username, user["id"]):
+                flash("That username is already taken.", "error")
+            elif username != user["username"]:
+                execute("UPDATE users SET username=? WHERE id=?", username, user["id"])
+                flash(f"Your handle is now @{username}.", "success")
+                return redirect(url_for("account_settings"))
+        elif action == "password":
+            current = request.form.get("current_password", "")
+            password = request.form.get("password", "")
+            confirm = request.form.get("confirm_password", "")
+            if not verify_password(user["password_hash"], current):
+                flash("Your current password is not right.", "error")
+            elif len(password) < 8:
+                flash("The new password must be at least 8 characters.", "error")
+            elif password != confirm:
+                flash("The new passwords do not match.", "error")
+            else:
+                execute(
+                    "UPDATE users SET password_hash=?, session_epoch=session_epoch+1"
+                    " WHERE id=?", hash_password(password), user["id"],
+                )
+                # current_user() is cached for this request and still holds the
+                # old epoch; read the row again so the new cookie is not stale.
+                start_session(first("SELECT * FROM users WHERE id=?", user["id"]) or user)
+                flash("Password changed. Every other device has been signed out.", "success")
+                return redirect(url_for("account_settings"))
+        elif action == "sign_out_everywhere":
+            execute(
+                "UPDATE users SET session_epoch=session_epoch+1 WHERE id=?", user["id"]
+            )
+            start_session(first("SELECT * FROM users WHERE id=?", user["id"]) or user)
+            flash("Every other device has been signed out.", "success")
+            return redirect(url_for("settings"))
+    return render_template(
+        "account_settings.html",
+        user=user,
+        email_verified=email_is_verified(user),
+        two_factor=bool(user.get("totp_enabled") and gplus3_schema()),
+        recovery_left=len(json.loads(user.get("totp_recovery") or "[]"))
+        if user.get("totp_recovery") else 0,
+        reset_minutes=RESET_TOKEN_MINUTES,
+    )
+
+
+@app.route("/settings/two-factor", methods=["GET", "POST"])
+@login_required
+def two_factor_settings():
+    user = current_user()
+    if not gplus3_schema():
+        flash("Two-factor authentication needs the newest database migration.", "error")
+        return redirect(url_for("settings"))
+    if user.get("totp_enabled"):
+        return redirect(url_for("account_settings"))
+    secret = session.get("totp_setup_secret")
+    if not secret:
+        secret = new_totp_secret()
+        session["totp_setup_secret"] = secret
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        if not verify_totp(secret, code):
+            flash("That code did not work. Try the next one.", "error")
+        else:
+            codes = new_recovery_codes()
+            execute(
+                "UPDATE users SET totp_secret=?, totp_enabled=1, totp_recovery=?"
+                " WHERE id=?",
+                secret, hash_recovery_codes(codes), user["id"],
+            )
+            session.pop("totp_setup_secret", None)
+            return render_template("two_factor_codes.html", codes=codes)
+    return render_template(
+        "two_factor_setup.html", secret=secret,
+        uri=totp_uri(secret, user["username"]),
+    )
+
+
+@app.post("/settings/two-factor/disable")
+@login_required
+def disable_two_factor():
+    user = current_user()
+    if not gplus3_schema():
+        return redirect(url_for("settings"))
+    if not verify_password(user["password_hash"], request.form.get("password", "")):
+        flash("Your password is not right, so two-factor was left on.", "error")
+    else:
+        execute(
+            "UPDATE users SET totp_enabled=0, totp_secret=NULL, totp_recovery=NULL"
+            " WHERE id=?", user["id"],
+        )
+        flash("Two-factor authentication is off.", "success")
+    return redirect(url_for("account_settings"))
+
+
+@app.post("/settings/two-factor/recovery")
+@login_required
+def regenerate_recovery_codes():
+    user = current_user()
+    if not gplus3_schema() or not user.get("totp_enabled"):
+        return redirect(url_for("account_settings"))
+    if not verify_password(user["password_hash"], request.form.get("password", "")):
+        flash("Your password is not right, so the codes are unchanged.", "error")
+        return redirect(url_for("account_settings"))
+    codes = new_recovery_codes()
+    execute(
+        "UPDATE users SET totp_recovery=? WHERE id=?",
+        hash_recovery_codes(codes), user["id"],
+    )
+    return render_template("two_factor_codes.html", codes=codes)
+
+
+@app.post("/settings/verify-email")
+@login_required
+def resend_verification():
+    user = current_user()
+    if not user.get("email"):
+        flash("Add an email address on the notification settings page first.", "error")
+        return redirect(url_for("notification_settings"))
+    if not gplus3_schema():
+        flash("Email verification needs the newest database migration.", "error")
+        return redirect(url_for("settings"))
+    token = create_email_verification(user, user["email"])
+    if token:
+        link = url_for("verify_email", token=token, _external=True)
+        enqueue_email(
+            user["email"], "email_verification",
+            "Verify your Systematics Black MIDI email",
+            "Open this link to verify the address on your account:\n\n" + link,
+            user["id"],
+        )
+        flash("A verification link has been queued to that address.", "success")
+    else:
+        flash("The verification link could not be created.", "error")
+    return redirect(url_for("notification_settings"))
 
 
 # Social links ----------------------------------------------------------------
@@ -4577,6 +5756,7 @@ def profile_user(username):
 
 @app.route("/profile/<username>")
 def profile(username):
+    publish_due_posts()
     user = profile_user(username)
     state = viewer_follow_state(user)
     viewer_id = state["viewer_id"]
@@ -4714,6 +5894,11 @@ def profile_settings():
         cover_position = request.form.get("cover_position", "center")
         if cover_position not in ("center", "top", "bottom"):
             cover_position = "center"
+        # A square picture cropped by the circle it is shown in: picking which
+        # third of it survives is enough to stop a face being cut off.
+        avatar_position = request.form.get("avatar_position", "center")
+        if avatar_position not in ("center", "top", "bottom"):
+            avatar_position = "center"
         if not 1 <= len(display_name) <= 40:
             flash("Display name must be 1–40 characters.", "error")
         elif len(bio) > MAX_BIO_LENGTH:
@@ -4741,6 +5926,7 @@ def profile_settings():
                     "tagline": tagline or None,
                     "nickname": nickname or None,
                     "cover_position": cover_position,
+                    "avatar_position": avatar_position,
                     # The list is only ever read and written as a whole, so it
                     # lives in one JSON column instead of its own table.
                     "social_links": json.dumps(links) if links else None,
@@ -4769,6 +5955,8 @@ def profile_settings():
                                    "about_gender", "about_contact",
                                    "bragging_rights"):
                         fields.pop(column, None)
+                if not gplus3_schema():
+                    fields.pop("avatar_position", None)
                 # Column names come from the literals above, not from input.
                 assignments = ", ".join(f"{column}=?" for column in fields)
                 execute(
@@ -5025,9 +6213,11 @@ def messages():
     return render_template(
         "messages.html",
         threads=conversations_for(user),
+        chats=chats_for(user),
         notices=standalone_notices(user["id"]),
         unread=unread_messages(user),
         moderation_id=(moderation_account() or {}).get("id"),
+        max_chat_title=MAX_CHAT_TITLE,
     )
 
 
@@ -5080,7 +6270,8 @@ def new_conversation(username):
         return redirect(url_for("conversation", conversation_id=existing["id"]))
     if request.method == "POST":
         body = request.form.get("body", "").strip()
-        error = conversation_body_error(body)
+        attachment, attachment_error = save_image_upload(request.files.get("image"))
+        error = attachment_error or (conversation_body_error(body) if not attachment else "")
         if error:
             flash(error, "error")
         else:
@@ -5089,13 +6280,14 @@ def new_conversation(username):
                 flash("Messages are not available right now - has migration 0015 "
                       "been applied to this database?", "error")
                 return redirect(url_for("messages"))
-            send_direct_message(thread, user, body)
+            send_direct_message(thread, user, body, attachment)
             return redirect(url_for("conversation", conversation_id=thread["id"]) + "#bottom")
     return render_template(
         "conversation.html",
         # No thread exists yet, so nothing in the list is the open one - but the
         # right pane is open all the same, holding the first message being typed.
         threads=conversations_for(user),
+        chats=chats_for(user),
         notices=standalone_notices(user["id"]),
         unread=unread_messages(user),
         selected=None,
@@ -5146,11 +6338,12 @@ def conversation(conversation_id):
             flash("You cannot message that account.", "error")
             return redirect(url_for("conversation", conversation_id=conversation_id))
         body = request.form.get("body", "").strip()
-        error = conversation_body_error(body)
+        attachment, attachment_error = save_image_upload(request.files.get("image"))
+        error = attachment_error or (conversation_body_error(body) if not attachment else "")
         if error:
             flash(error, "error")
             return redirect(url_for("conversation", conversation_id=conversation_id))
-        send_direct_message(thread, user if mine else account, body)
+        send_direct_message(thread, user if mine else account, body, attachment)
         return redirect(url_for("conversation", conversation_id=conversation_id) + "#bottom")
     # Whoever is reading is one of the two voices in the thread: their own account,
     # or the site's when an admin is standing in for it. Marking that side read is
@@ -5166,6 +6359,7 @@ def conversation(conversation_id):
         # what makes the page read as one screen: pick another person on the left
         # and the pane on the right changes.
         threads=inbox_threads(user, standing_in=standing_in),
+        chats=chats_for(user) if user else [],
         notices=standalone_notices(user["id"]) if user else [],
         unread=unread_messages(user),
         selected=thread["id"],
@@ -5183,6 +6377,215 @@ def conversation(conversation_id):
         moderation_id=(account or {}).get("id"),
         moderation=account,
     )
+
+
+@app.route("/messages/group/new", methods=["GET", "POST"])
+@login_required
+def new_group_chat():
+    """Start a group Hangout: a title and a handful of handles."""
+    user = current_user()
+    if not gplus3_schema():
+        flash("Group Hangouts need the newest database migration.", "error")
+        return redirect(url_for("messages"))
+    title = request.form.get("title", "").strip() if request.method == "POST" else ""
+    members_text = request.form.get("members", "").strip() if request.method == "POST" else ""
+    if request.method == "POST":
+        people = []
+        missing = []
+        for raw in re.split(r"[,\s]+", members_text):
+            username = raw.strip().lstrip("@")
+            if not username:
+                continue
+            person = first(
+                "SELECT id, username, display_name, deleted_at FROM users"
+                " WHERE username=? COLLATE NOCASE", username,
+            )
+            if person and not person.get("deleted_at") and person["id"] != user["id"]:
+                people.append(person)
+            else:
+                missing.append(username)
+        if not 1 <= len(title) <= MAX_CHAT_TITLE:
+            flash(f"Give the Hangout a title of 1-{MAX_CHAT_TITLE} characters.", "error")
+        elif not people:
+            flash("Add at least one other person by handle.", "error")
+        elif len(people) > MAX_CHAT_MEMBERS:
+            flash(f"A group can hold {MAX_CHAT_MEMBERS} people.", "error")
+        else:
+            chat = open_group_chat(user, title, [person["id"] for person in people])
+            if chat:
+                for person in people:
+                    notify(
+                        person["id"], "hangout", user["id"],
+                        link=url_for("group_chat", chat_id=chat["id"]),
+                    )
+                flash(f"Group Hangout \"{title}\" started.", "success")
+                return redirect(url_for("group_chat", chat_id=chat["id"]))
+            flash("The group could not be created.", "error")
+        if missing:
+            flash("No account: " + ", ".join(missing[:5]), "error")
+    return render_template(
+        "group_new.html",
+        threads=conversations_for(user), chats=chats_for(user),
+        notices=standalone_notices(user["id"]), unread=unread_messages(user),
+        selected=None, selected_chat=None, composing=True,
+        moderation_id=(moderation_account() or {}).get("id"),
+        max_chat_title=MAX_CHAT_TITLE, title_value=title, members_value=members_text,
+    )
+
+
+@app.route("/messages/g/<int:chat_id>", methods=["GET", "POST"])
+@login_required
+def group_chat(chat_id):
+    """A group Hangout: the same two-pane screen, with a group thread in the pane."""
+    user = current_user()
+    if not gplus3_schema():
+        abort(404)
+    chat = chat_by_id(chat_id)
+    if not chat or not chat_is_member(chat, user):
+        abort(404)
+    if request.method == "POST":
+        body = request.form.get("body", "").strip()
+        attachment, attachment_error = save_image_upload(request.files.get("image"))
+        error = attachment_error or (conversation_body_error(body) if not attachment else "")
+        if error:
+            flash(error, "error")
+        else:
+            send_chat_message(chat, user, body, attachment)
+        return redirect(url_for("group_chat", chat_id=chat_id) + "#bottom")
+    mark_chat_read(chat, user)
+    members = chat_member_rows(chat["id"])
+    my_membership = next((m for m in members if m["id"] == user["id"]), None)
+    return render_template(
+        "chat.html",
+        threads=conversations_for(user), chats=chats_for(user),
+        notices=standalone_notices(user["id"]), unread=unread_messages(user),
+        selected=None, selected_chat=chat["id"], composing=False,
+        moderation_id=(moderation_account() or {}).get("id"),
+        max_chat_title=MAX_CHAT_TITLE,
+        chat=chat, members=members, chat_messages=chat_messages(chat["id"]),
+        my_role=(my_membership or {}).get("role"),
+        can_post=True,
+    )
+
+
+@app.post("/messages/g/<int:chat_id>/add")
+@login_required
+def add_chat_member(chat_id):
+    user = current_user()
+    chat = chat_by_id(chat_id) if gplus3_schema() else None
+    if not chat or not chat_is_member(chat, user):
+        abort(404)
+    username = request.form.get("username", "").strip().lstrip("@")
+    person = first(
+        "SELECT id, username, display_name, deleted_at FROM users"
+        " WHERE username=? COLLATE NOCASE", username,
+    )
+    if not person or person.get("deleted_at"):
+        flash("There is no account by that name.", "error")
+    elif person["id"] in chat_member_ids(chat):
+        flash("They are already in this Hangout.", "error")
+    elif len(chat_member_ids(chat)) >= MAX_CHAT_MEMBERS:
+        flash(f"A group can hold {MAX_CHAT_MEMBERS} people.", "error")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO chat_members (chat_id, user_id, role)"
+            " VALUES (?, ?, 'member')", chat["id"], person["id"],
+        )
+        send_chat_message(chat, user, f"{person['display_name']} joined the Hangout.")
+        notify(
+            person["id"], "hangout", user["id"],
+            link=url_for("group_chat", chat_id=chat["id"]),
+        )
+        flash(f"Added {person['display_name']}.", "success")
+    return redirect(url_for("group_chat", chat_id=chat_id))
+
+
+@app.post("/messages/g/<int:chat_id>/rename")
+@login_required
+def rename_chat(chat_id):
+    user = current_user()
+    chat = chat_by_id(chat_id) if gplus3_schema() else None
+    if not chat or not chat_is_member(chat, user):
+        abort(404)
+    title = request.form.get("title", "").strip()
+    if not 1 <= len(title) <= MAX_CHAT_TITLE:
+        flash(f"A title is 1-{MAX_CHAT_TITLE} characters.", "error")
+    else:
+        execute("UPDATE chat_threads SET title=? WHERE id=?", title, chat_id)
+        flash("Hangout renamed.", "success")
+    return redirect(url_for("group_chat", chat_id=chat_id))
+
+
+@app.post("/messages/g/<int:chat_id>/leave")
+@login_required
+def leave_chat(chat_id):
+    user = current_user()
+    chat = chat_by_id(chat_id) if gplus3_schema() else None
+    if not chat or not chat_is_member(chat, user):
+        abort(404)
+    members = chat_member_rows(chat["id"])
+    others = [person for person in members if person["id"] != user["id"]]
+    safe_execute(
+        "DELETE FROM chat_members WHERE chat_id=? AND user_id=?", chat_id, user["id"]
+    )
+    if not others:
+        safe_execute("DELETE FROM chat_threads WHERE id=?", chat_id)
+        flash("You left the Hangout; it had nobody else in it, so it was removed.", "success")
+        return redirect(url_for("messages"))
+    # The owner leaving hands the room to the longest-standing remaining member.
+    owner = next((p for p in others if p["role"] == "owner"), None)
+    if not owner:
+        execute(
+            "UPDATE chat_members SET role='owner' WHERE chat_id=? AND user_id=?",
+            chat_id, others[0]["id"],
+        )
+    send_chat_message(chat, user, f"{user['display_name']} left the Hangout.")
+    flash("You left the Hangout.", "success")
+    return redirect(url_for("messages"))
+
+
+@app.post("/messages/g/<int:chat_id>/call")
+@login_required
+def call_group_chat(chat_id):
+    user = current_user()
+    chat = chat_by_id(chat_id) if gplus3_schema() else None
+    if not chat or not chat_is_member(chat, user):
+        abort(404)
+    participants = [user_by_id(member_id) for member_id in chat_member_ids(chat)]
+    room = create_call_room(
+        user, f"{chat['title']} - Hangout",
+        [person for person in participants if person], chat_id=chat["id"],
+    )
+    if not room:
+        flash("The call could not be started.", "error")
+        return redirect(url_for("group_chat", chat_id=chat_id))
+    send_chat_message(
+        chat, user,
+        "Started a Hangout call: " + url_for("hangout", room=room["room"], _external=True),
+    )
+    return redirect(url_for("hangout", room=room["room"]))
+
+
+@app.post("/messages/c/<int:conversation_id>/call")
+@login_required
+def call_conversation(conversation_id):
+    user = current_user()
+    thread = conversation_by_id(conversation_id)
+    if not thread or not conversation_is_participant(thread, user):
+        abort(404)
+    other = user_by_id(conversation_other_id(thread, user["id"]))
+    room = create_call_room(
+        user, f"Call with {other['display_name'] if other else 'a friend'}",
+        [other] if other else [], conversation_id=thread["id"],
+    )
+    if not room:
+        flash("The call could not be started.", "error")
+        return redirect(url_for("conversation", conversation_id=conversation_id))
+    send_direct_message(
+        thread, user,
+        "Started a Hangout call: " + url_for("hangout", room=room["room"], _external=True),
+    )
+    return redirect(url_for("hangout", room=room["room"]))
 
 
 @app.route("/messages/<int:message_id>")
@@ -5316,6 +6719,7 @@ def admin():
 @app.post("/admin/delete-comment/<int:comment_id>")
 @admin_required
 def delete_comment(comment_id):
+    delete_comment_uploads(comment_id)
     execute("DELETE FROM comments WHERE id=?", comment_id)
     return redirect(url_for("admin") + "#comments")
 
@@ -5689,12 +7093,20 @@ def communities():
     if not revival_ready():
         return render_template("communities.html", communities=[], needs_migration=True)
     viewer = current_user()
+    category = request.args.get("category", "")
+    if category not in COMMUNITY_CATEGORIES:
+        category = ""
     return render_template(
         "communities.html",
-        communities=community_rows(viewer["id"] if viewer else 0),
+        communities=community_rows(viewer["id"] if viewer else 0, category),
         needs_migration=False,
         max_name=MAX_COMMUNITY_NAME,
         max_description=MAX_COMMUNITY_DESCRIPTION,
+        max_rules=MAX_COMMUNITY_RULES,
+        categories=COMMUNITY_CATEGORIES,
+        category=category,
+        join_policies=COMMUNITY_JOIN_POLICIES,
+        can_extras=gplus3_schema(),
     )
 
 
@@ -5706,6 +7118,13 @@ def create_community():
     name = request.form.get("name", "").strip()
     slug = request.form.get("slug", "").strip().lower()
     description = request.form.get("description", "").strip()
+    category = request.form.get("category", "")
+    if category not in COMMUNITY_CATEGORIES:
+        category = ""
+    join_policy = request.form.get("join_policy", "open")
+    if join_policy not in COMMUNITY_JOIN_POLICIES:
+        join_policy = "open"
+    rules = request.form.get("rules", "").strip()
     if not 1 <= len(name) <= MAX_COMMUNITY_NAME:
         flash(f"A community needs a name of 1-{MAX_COMMUNITY_NAME} characters.", "error")
     elif not re.fullmatch(r"[a-z0-9-]{3,40}", slug):
@@ -5714,19 +7133,44 @@ def create_community():
         flash("That community address is taken.", "error")
     elif len(description) > MAX_COMMUNITY_DESCRIPTION:
         flash("That description is too long.", "error")
+    elif len(rules) > MAX_COMMUNITY_RULES:
+        flash("Those rules are too long.", "error")
     else:
-        execute(
-            "INSERT INTO communities (slug, name, description, owner_id)"
-            " VALUES (?, ?, ?, ?)",
-            slug, name, description or None, current_user()["id"],
-        )
+        avatar, avatar_error = save_image_upload(request.files.get("avatar"))
+        banner, banner_error = save_image_upload(request.files.get("banner"))
+        if avatar_error or banner_error:
+            for stored in (avatar, banner):
+                delete_upload(stored)
+            flash(avatar_error or banner_error, "error")
+            return redirect(url_for("communities"))
+        if gplus3_schema():
+            execute(
+                "INSERT INTO communities (slug, name, description, owner_id, category,"
+                " avatar, banner, rules, join_policy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                slug, name, description or None, current_user()["id"], category or None,
+                avatar, banner, rules or None, join_policy,
+            )
+        else:
+            execute(
+                "INSERT INTO communities (slug, name, description, owner_id)"
+                " VALUES (?, ?, ?, ?)",
+                slug, name, description or None, current_user()["id"],
+            )
         created = first("SELECT last_insert_rowid() AS id")
         if created:
-            safe_execute(
-                "INSERT OR IGNORE INTO community_members (community_id, user_id, role)"
-                " VALUES (?, ?, 'owner')",
-                created["id"], current_user()["id"],
-            )
+            if gplus3_schema():
+                safe_execute(
+                    "INSERT OR IGNORE INTO community_members"
+                    " (community_id, user_id, role, status)"
+                    " VALUES (?, ?, 'owner', 'active')",
+                    created["id"], current_user()["id"],
+                )
+            else:
+                safe_execute(
+                    "INSERT OR IGNORE INTO community_members (community_id, user_id, role)"
+                    " VALUES (?, ?, 'owner')",
+                    created["id"], current_user()["id"],
+                )
         flash(f"Community \"{name}\" created.", "success")
         return redirect(url_for("community", slug=slug))
     return redirect(url_for("communities"))
@@ -5743,23 +7187,27 @@ def community(slug):
     viewer = current_user()
     viewer_id = viewer["id"] if viewer else 0
     membership = community_membership(row["id"], viewer_id)
+    can_manage = community_can_moderate(row, viewer)
     clause, params = visibility_sql(viewer_id)
+    order = ("posts.community_pinned DESC, posts.id DESC"
+             if gplus3_schema() else "posts.id DESC")
     posts = fetch_posts(
         f"WHERE {clause} AND posts.community_id=?",
-        tuple(params + [row["id"]]), order="posts.id DESC", limit=40,
+        tuple(params + [row["id"]]), order=order, limit=40,
     )
-    member_rows = safe_query("""
-        SELECT users.id, users.username, users.display_name, users.profile_picture,
-               community_members.role, community_members.joined_at
-        FROM community_members JOIN users ON users.id = community_members.user_id
-        WHERE community_members.community_id=?
-        ORDER BY community_members.joined_at LIMIT 60
-    """, row["id"])
+    members = community_member_rows(row["id"], "active")
+    pending = community_member_rows(row["id"], "pending") if can_manage else []
     return render_template(
         "community.html", community=row, owner=owner, posts=posts,
-        membership=membership, members=member_rows,
+        membership=membership, members=members, pending=pending,
         is_community_owner=bool(viewer and row["owner_id"] == viewer["id"]),
-        can_manage_members=bool(membership and membership["role"] in ("owner", "moderator")),
+        can_manage_members=can_manage,
+        can_manage=can_manage,
+        events=community_events(row["id"]),
+        report_count=len(community_reports(row["id"])) if can_manage else 0,
+        join_policies=COMMUNITY_JOIN_POLICIES,
+        categories=COMMUNITY_CATEGORIES,
+        max_rules=MAX_COMMUNITY_RULES,
     )
 
 
@@ -5771,12 +7219,37 @@ def join_community(slug):
     row = community_by_slug(slug)
     if not row:
         abort(404)
-    safe_execute(
-        "INSERT OR IGNORE INTO community_members (community_id, user_id, role)"
-        " VALUES (?, ?, 'member')",
-        row["id"], current_user()["id"],
-    )
-    flash(f"Joined {row['name']}.", "success")
+    viewer = current_user()
+    existing = community_membership(row["id"], viewer["id"])
+    if existing:
+        flash("You are already in this community.", "error")
+        return redirect(url_for("community", slug=slug))
+    policy = row.get("join_policy") or "open"
+    if gplus3_schema() and policy == "invite":
+        flash("This community is invite-only. Ask a moderator for an invitation.", "error")
+        return redirect(url_for("community", slug=slug))
+    status = "pending" if gplus3_schema() and policy == "approval" else "active"
+    if gplus3_schema():
+        safe_execute(
+            "INSERT OR IGNORE INTO community_members (community_id, user_id, role, status)"
+            " VALUES (?, ?, 'member', ?)",
+            row["id"], viewer["id"], status,
+        )
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO community_members (community_id, user_id, role)"
+            " VALUES (?, ?, 'member')",
+            row["id"], viewer["id"],
+        )
+    if status == "pending":
+        for moderator_id in community_moderator_ids(row["id"]):
+            notify(
+                moderator_id, "community_join", viewer["id"],
+                link=url_for("community", slug=slug),
+            )
+        flash(f"Asked to join {row['name']}. A moderator will decide.", "success")
+    else:
+        flash(f"Joined {row['name']}.", "success")
     return redirect(url_for("community", slug=slug))
 
 
@@ -5799,6 +7272,189 @@ def leave_community(slug):
     return redirect(url_for("community", slug=slug))
 
 
+@app.route("/c/<slug>/settings", methods=["GET", "POST"])
+@login_required
+def community_settings(slug):
+    """Branding, rules, category and join policy - owner only."""
+    if not gplus3_schema():
+        flash("Community settings need the newest database migration.", "error")
+        return redirect(url_for("community", slug=slug))
+    row = community_by_slug(slug)
+    if not row:
+        abort(404)
+    viewer = current_user()
+    if row["owner_id"] != viewer["id"]:
+        flash("Only the community owner can change its settings.", "error")
+        return redirect(url_for("community", slug=slug))
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        description = request.form.get("description", "").strip()
+        category = request.form.get("category", "")
+        if category not in COMMUNITY_CATEGORIES:
+            category = ""
+        join_policy = request.form.get("join_policy", "open")
+        if join_policy not in COMMUNITY_JOIN_POLICIES:
+            join_policy = "open"
+        rules = request.form.get("rules", "").strip()
+        if not 1 <= len(name) <= MAX_COMMUNITY_NAME:
+            flash("That name is too short or too long.", "error")
+        elif len(description) > MAX_COMMUNITY_DESCRIPTION or len(rules) > MAX_COMMUNITY_RULES:
+            flash("The description or rules are too long.", "error")
+        else:
+            avatar, avatar_error = save_image_upload(request.files.get("avatar"))
+            banner, banner_error = save_image_upload(request.files.get("banner"))
+            if avatar_error or banner_error:
+                for stored in (avatar, banner):
+                    delete_upload(stored)
+                flash(avatar_error or banner_error, "error")
+            else:
+                fields = {
+                    "name": name, "description": description or None,
+                    "category": category or None, "rules": rules or None,
+                    "join_policy": join_policy,
+                }
+                removed = []
+                if avatar:
+                    fields["avatar"] = avatar
+                    removed.append(row.get("avatar"))
+                elif request.form.get("remove_avatar"):
+                    fields["avatar"] = None
+                    removed.append(row.get("avatar"))
+                if banner:
+                    fields["banner"] = banner
+                    removed.append(row.get("banner"))
+                elif request.form.get("remove_banner"):
+                    fields["banner"] = None
+                    removed.append(row.get("banner"))
+                assignments = ", ".join(f"{column}=?" for column in fields)
+                execute(
+                    f"UPDATE communities SET {assignments} WHERE id=?",
+                    *fields.values(), row["id"],
+                )
+                for filename in removed:
+                    delete_upload(filename)
+                flash("Community updated.", "success")
+                return redirect(url_for("community", slug=slug))
+    return render_template(
+        "community_settings.html", community=row,
+        categories=COMMUNITY_CATEGORIES, join_policies=COMMUNITY_JOIN_POLICIES,
+        max_name=MAX_COMMUNITY_NAME, max_description=MAX_COMMUNITY_DESCRIPTION,
+        max_rules=MAX_COMMUNITY_RULES,
+    )
+
+
+@app.post("/c/<slug>/members/<int:user_id>/approve")
+@login_required
+def approve_community_member(slug, user_id):
+    if not gplus3_schema():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row or not community_can_moderate(row, current_user()):
+        abort(404)
+    safe_execute(
+        "UPDATE community_members SET status='active' WHERE community_id=? AND user_id=?",
+        row["id"], user_id,
+    )
+    notify(user_id, "community", current_user()["id"])
+    flash("Member approved.", "success")
+    return redirect(url_for("community", slug=slug))
+
+
+@app.post("/c/<slug>/members/<int:user_id>/deny")
+@login_required
+def deny_community_member(slug, user_id):
+    if not gplus3_schema():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row or not community_can_moderate(row, current_user()):
+        abort(404)
+    if user_id == row["owner_id"]:
+        flash("The owner cannot be removed.", "error")
+    else:
+        safe_execute(
+            "DELETE FROM community_members WHERE community_id=? AND user_id=?"
+            " AND status='pending'",
+            row["id"], user_id,
+        )
+        flash("Request declined.", "success")
+    return redirect(url_for("community", slug=slug))
+
+
+@app.post("/c/<slug>/invite")
+@login_required
+def invite_community_member(slug):
+    if not gplus3_schema():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row or not community_can_moderate(row, current_user()):
+        abort(404)
+    username = request.form.get("username", "").strip().lstrip("@")
+    person = first(
+        "SELECT id, display_name, deleted_at FROM users WHERE username=? COLLATE NOCASE",
+        username,
+    )
+    if not person or person.get("deleted_at"):
+        flash("There is no account by that name.", "error")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO community_members"
+            " (community_id, user_id, role, status) VALUES (?, ?, 'member', 'active')",
+            row["id"], person["id"],
+        )
+        notify(person["id"], "community", current_user()["id"])
+        flash(f"{person['display_name']} can now join in {row['name']}.", "success")
+    return redirect(url_for("community", slug=slug))
+
+
+@app.post("/c/<slug>/posts/<int:post_id>/pin")
+@login_required
+def pin_community_post(slug, post_id):
+    if not gplus3_schema():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row or not community_can_moderate(row, current_user()):
+        abort(404)
+    post = post_row(post_id)
+    if not post or post.get("community_id") != row["id"]:
+        abort(404)
+    safe_execute(
+        "UPDATE posts SET community_pinned=CASE WHEN community_pinned=1 THEN 0 ELSE 1 END"
+        " WHERE id=?", post_id,
+    )
+    flash("Pin changed.", "success")
+    return redirect(post_path(post_id))
+
+
+@app.route("/c/<slug>/moderation")
+@login_required
+def community_moderation(slug):
+    if not gplus3_schema():
+        abort(404)
+    row = community_by_slug(slug)
+    if not row or not community_can_moderate(row, current_user()):
+        abort(404)
+    return render_template(
+        "community_moderation.html", community=row, reports=community_reports(row["id"]),
+    )
+
+
+@app.post("/c/<slug>/moderation/<int:report_id>/resolve")
+@login_required
+def resolve_community_report(slug, report_id):
+    if not gplus3_schema():
+        abort(404)
+    row = community_by_slug(slug)
+    if not row or not community_can_moderate(row, current_user()):
+        abort(404)
+    safe_execute(
+        "UPDATE reports SET resolved_at=datetime('now'), resolved_by=?"
+        " WHERE id=? AND resolved_at IS NULL",
+        actor_name(current_user()), report_id,
+    )
+    flash("Report closed.", "success")
+    return redirect(url_for("community_moderation", slug=slug))
+
+
 # Events ------------------------------------------------------------------------
 
 @app.route("/events")
@@ -5817,34 +7473,55 @@ def events():
 def new_event():
     if not revival_ready():
         return redirect(url_for("home"))
+    user = current_user()
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         description = request.form.get("description", "").strip()
         location = request.form.get("location", "").strip()
         starts = request.form.get("starts_at", "").strip().replace("T", " ")
+        community_id = request.form.get("community_id", "")
+        community = None
+        if community_id.isdigit() and gplus3_schema():
+            community = safe_first("SELECT * FROM communities WHERE id=?", int(community_id))
+            if community and not community_membership(community["id"], user["id"]):
+                community = None
         if not 1 <= len(title) <= MAX_EVENT_TITLE:
             flash("Give the event a title.", "error")
         elif not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", starts):
             flash("Pick a date and time for the event.", "error")
         else:
-            execute(
-                "INSERT INTO events (owner_id, title, description, starts_at, location)"
-                " VALUES (?, ?, ?, ?, ?)",
-                current_user()["id"], title, description or None, starts,
-                location or None,
-            )
-            created = first("SELECT last_insert_rowid() AS id")
-            if created:
-                safe_execute(
-                    "INSERT OR IGNORE INTO event_attendees (event_id, user_id, status)"
-                    " VALUES (?, ?, 'going')",
-                    created["id"], current_user()["id"],
-                )
-                flash("Event created.", "success")
-                return redirect(url_for("event", event_id=created["id"]))
+            cover, cover_error = save_image_upload(request.files.get("cover"))
+            if cover_error:
+                flash(cover_error, "error")
+            else:
+                if gplus3_schema():
+                    execute(
+                        "INSERT INTO events (owner_id, title, description, starts_at,"
+                        " location, cover, community_id, updated_at)"
+                        " VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                        user["id"], title, description or None, starts,
+                        location or None, cover, community["id"] if community else None,
+                    )
+                else:
+                    execute(
+                        "INSERT INTO events (owner_id, title, description, starts_at, location)"
+                        " VALUES (?, ?, ?, ?, ?)",
+                        user["id"], title, description or None, starts,
+                        location or None,
+                    )
+                created = first("SELECT last_insert_rowid() AS id")
+                if created:
+                    safe_execute(
+                        "INSERT OR IGNORE INTO event_attendees (event_id, user_id, status)"
+                        " VALUES (?, ?, 'going')",
+                        created["id"], user["id"],
+                    )
+                    flash("Event created.", "success")
+                    return redirect(url_for("event", event_id=created["id"]))
     return render_template(
-        "event_editor.html", max_title=MAX_EVENT_TITLE,
+        "event_editor.html", event=None, max_title=MAX_EVENT_TITLE,
         max_description=MAX_EVENT_DESCRIPTION, max_location=MAX_EVENT_LOCATION,
+        my_communities=communities_for(user["id"]) if gplus3_schema() else [],
     )
 
 
@@ -5857,7 +7534,8 @@ def event(event_id):
         abort(404)
     owner = first("SELECT * FROM users WHERE id=?", row["owner_id"])
     viewer = current_user()
-    clause, params = visibility_sql(viewer["id"] if viewer else 0)
+    viewer_id = viewer["id"] if viewer else 0
+    clause, params = visibility_sql(viewer_id)
     posts = fetch_posts(
         f"WHERE {clause} AND posts.event_id=?",
         tuple(params + [event_id]), order="posts.id DESC", limit=20,
@@ -5869,9 +7547,126 @@ def event(event_id):
         WHERE event_attendees.event_id=?
         ORDER BY event_attendees.updated_at
     """, event_id)
+    community = safe_first(
+        "SELECT * FROM communities WHERE id=?", row.get("community_id")
+    ) if gplus3_schema() else None
     return render_template(
         "event.html", event=row, owner=owner, posts=posts, attendees=attendees,
-        attendance=event_attendance(event_id, viewer["id"] if viewer else 0),
+        attendance=event_attendance(event_id, viewer_id),
+        invites=event_invites(event_id), invited=event_invited(event_id, viewer_id),
+        is_owner=bool(viewer and row["owner_id"] == viewer["id"]),
+        community=community,
+    )
+
+
+@app.route("/events/<int:event_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_event(event_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = event_by_id(event_id)
+    if not row:
+        abort(404)
+    user = current_user()
+    if row["owner_id"] != user["id"]:
+        flash("Only the person who created an event can edit it.", "error")
+        return redirect(url_for("event", event_id=event_id))
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        description = request.form.get("description", "").strip()
+        location = request.form.get("location", "").strip()
+        starts = request.form.get("starts_at", "").strip().replace("T", " ")
+        if not 1 <= len(title) <= MAX_EVENT_TITLE:
+            flash("Give the event a title.", "error")
+        elif not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", starts):
+            flash("Pick a date and time for the event.", "error")
+        else:
+            cover, cover_error = save_image_upload(request.files.get("cover"))
+            if cover_error:
+                flash(cover_error, "error")
+            else:
+                fields = {
+                    "title": title, "description": description or None,
+                    "starts_at": starts, "location": location or None,
+                }
+                if gplus3_schema():
+                    fields["updated_at"] = utcnow().strftime(DB_TIME_FORMAT)
+                    if cover:
+                        fields["cover"] = cover
+                    elif request.form.get("remove_cover"):
+                        fields["cover"] = None
+                assignments = ", ".join(f"{column}=?" for column in fields)
+                execute(
+                    f"UPDATE events SET {assignments} WHERE id=?",
+                    *fields.values(), event_id,
+                )
+                if cover:
+                    delete_upload(row.get("cover"))
+                flash("Event updated.", "success")
+                return redirect(url_for("event", event_id=event_id))
+    return render_template(
+        "event_editor.html", event=row, max_title=MAX_EVENT_TITLE,
+        max_description=MAX_EVENT_DESCRIPTION, max_location=MAX_EVENT_LOCATION,
+        my_communities=communities_for(user["id"]) if gplus3_schema() else [],
+    )
+
+
+@app.post("/events/<int:event_id>/delete")
+@login_required
+def delete_event(event_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = event_by_id(event_id)
+    if not row:
+        abort(404)
+    if row["owner_id"] != current_user()["id"]:
+        flash("Only the person who created an event can delete it.", "error")
+        return redirect(url_for("event", event_id=event_id))
+    if row.get("cover"):
+        delete_upload(row["cover"])
+    safe_execute("UPDATE posts SET event_id=NULL WHERE event_id=?", event_id)
+    safe_execute("DELETE FROM events WHERE id=?", event_id)
+    flash("Event deleted. Its posts are still on their authors' profiles.", "success")
+    return redirect(url_for("events"))
+
+
+@app.post("/events/<int:event_id>/invite")
+@login_required
+def invite_event(event_id):
+    if not revival_ready() or not gplus3_schema():
+        flash("Event invitations need the newest database migration.", "error")
+        return redirect(url_for("event", event_id=event_id))
+    row = event_by_id(event_id)
+    if not row or row["owner_id"] != current_user()["id"]:
+        abort(404)
+    username = request.form.get("username", "").strip().lstrip("@")
+    person = first(
+        "SELECT id, display_name, deleted_at FROM users WHERE username=? COLLATE NOCASE",
+        username,
+    )
+    if not person or person.get("deleted_at"):
+        flash("There is no account by that name.", "error")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO event_invites (event_id, user_id, invited_by)"
+            " VALUES (?, ?, ?)", event_id, person["id"], current_user()["id"],
+        )
+        notify(
+            person["id"], "event", current_user()["id"],
+            link=url_for("event", event_id=event_id),
+        )
+        flash(f"Invited {person['display_name']}.", "success")
+    return redirect(url_for("event", event_id=event_id))
+
+
+@app.route("/events/<int:event_id>/calendar.ics")
+def event_calendar_file(event_id):
+    row = event_by_id(event_id)
+    if not row:
+        abort(404)
+    return Response(
+        event_calendar(row), status=200, mimetype="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="event-{event_id}.ics"'},
     )
 
 
@@ -5983,9 +7778,71 @@ def search():
                 " ORDER BY comments.id DESC LIMIT 20",
                 *(params + [pattern]),
             )
+    type_filter = request.args.get("type", "")
+    if type_filter not in ("posts", "people", "comments", "pages", "communities",
+                           "events", "sparks"):
+        type_filter = ""
+    pages = communities = events = sparks = []
+    if query_text and gplus2_schema():
+        page_pattern = like_pattern(query_text)
+        if type_filter in ("", "pages"):
+            pages = safe_query(
+                "SELECT name, slug, tagline, avatar, category, verified FROM pages"
+                " WHERE name LIKE ? ESCAPE '\\' OR tagline LIKE ? ESCAPE '\\'"
+                " ORDER BY name COLLATE NOCASE LIMIT 20",
+                page_pattern, page_pattern,
+            )
+        if type_filter in ("", "communities"):
+            communities = safe_query(
+                "SELECT slug, name, description, category, avatar FROM communities"
+                " WHERE name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'"
+                " OR category LIKE ? ESCAPE '\\'"
+                " ORDER BY name COLLATE NOCASE LIMIT 20",
+                page_pattern, page_pattern, page_pattern,
+            )
+        if type_filter in ("", "events"):
+            events = safe_query(
+                "SELECT id, title, starts_at, location FROM events"
+                " WHERE title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'"
+                " OR location LIKE ? ESCAPE '\\'"
+                " ORDER BY starts_at LIMIT 20",
+                page_pattern, page_pattern, page_pattern,
+            )
+        if type_filter in ("", "sparks"):
+            sparks = safe_query(
+                "SELECT slug, name, description FROM sparks"
+                " WHERE name LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\'"
+                " ORDER BY name COLLATE NOCASE LIMIT 20",
+                page_pattern, page_pattern,
+            )
+    if type_filter and type_filter != "posts":
+        posts = []
+    if type_filter and type_filter != "people":
+        people = []
+    if type_filter and type_filter != "comments":
+        comments = []
     return render_template(
         "search.html", q=query_text, posts=posts, people=people, comments=comments,
+        pages=pages, communities=communities, events=events, sparks=sparks,
+        result_type=type_filter,
     )
+
+
+def is_following_tag(tag, user_id):
+    if not tag or not user_id or not gplus3_schema():
+        return False
+    return bool(safe_first(
+        "SELECT 1 FROM tag_follows WHERE user_id=? AND tag=?", user_id, tag
+    ))
+
+
+def tag_follower_count(tag):
+    if not tag or not gplus3_schema():
+        return 0
+    row = safe_first(
+        "SELECT COUNT(*) AS total FROM tag_follows WHERE tag=?", tag
+    )
+    return int(row["total"]) if row else 0
 
 
 @app.route("/tag/<tag>")
@@ -5993,17 +7850,48 @@ def tag(tag):
     tag = (tag or "").strip().lower()[:MAX_FEED_TAG]
     if not re.fullmatch(r"[a-z0-9_]{1,40}", tag):
         abort(404)
+    publish_due_posts()
     clause, params = visibility_sql()
     posts = fetch_posts(
         f"WHERE {clause} AND posts.id IN (SELECT post_id FROM post_tags WHERE tag=?)",
         tuple(params + [tag]), order="posts.id DESC", limit=40,
     ) if gplus_schema() else []
-    return render_template("tag.html", tag=tag, posts=posts)
+    viewer = current_user()
+    return render_template(
+        "tag.html", tag=tag, posts=posts,
+        following_tag=is_following_tag(tag, viewer["id"] if viewer else 0),
+        follower_count=tag_follower_count(tag),
+    )
+
+
+@app.post("/tag/<tag>/follow")
+@login_required
+def follow_tag(tag):
+    if not gplus3_schema():
+        flash("Following tags needs the newest database migration.", "error")
+        return redirect(url_for("tag", tag=tag))
+    tag = (tag or "").strip().lower()[:MAX_FEED_TAG]
+    if not re.fullmatch(r"[a-z0-9_]{1,40}", tag):
+        abort(404)
+    viewer = current_user()
+    if is_following_tag(tag, viewer["id"]):
+        safe_execute(
+            "DELETE FROM tag_follows WHERE user_id=? AND tag=?", viewer["id"], tag
+        )
+        flash(f"Stopped following #{tag}.", "success")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO tag_follows (user_id, tag) VALUES (?, ?)",
+            viewer["id"], tag,
+        )
+        flash(f"Following #{tag}. New posts with it will notify you.", "success")
+    return redirect(url_for("tag", tag=tag))
 
 
 @app.route("/explore")
 def explore():
     """G+'s "What's Hot": what the site is actually paying attention to."""
+    publish_due_posts()
     clause, params = visibility_sql()
     if gplus_schema():
         engagement = (
@@ -6135,13 +8023,21 @@ def share_post(post_id):
         return redirect(post_path(post_id))
     user = current_user()
     audience = request.form.get("audience", "public")
-    if audience not in ("public", "private"):
+    circle = None
+    if audience == "circles":
+        circle_id = request.form.get("circle_id", "")
+        circle = circle_by_id(circle_id) if circle_id.isdigit() else None
+        if not circle or circle["user_id"] != user["id"]:
+            flash("Pick one of your own circles to share with.", "error")
+            return redirect(post_path(post_id))
+    elif audience not in ("public", "private"):
         audience = "public"
     execute(
         "INSERT INTO posts (title, content, status, user_id, category, public_id,"
-        " share_of, audience) VALUES (?, ?, 'published', ?, ?, ?, ?, ?)",
+        " share_of, audience, circle_id) VALUES (?, ?, 'published', ?, ?, ?, ?, ?, ?)",
         item["title"], body, user["id"], post_category_for(user["username"]),
         generate_post_public_id(), item["id"], audience,
+        circle["id"] if circle else None,
     )
     created = first("SELECT last_insert_rowid() AS id")
     if not created:
@@ -6292,6 +8188,7 @@ def remove_comment(comment_id):
     if not comment:
         abort(404)
     user = current_user()
+    delete_comment_uploads(comment_id)
     allowed = (
         comment["user_id"] == user["id"]
         or comment["post_user_id"] == user["id"]
@@ -6530,14 +8427,23 @@ def page_post_count(page_id):
 @app.route("/pages")
 def pages():
     viewer = current_user()
+    category = request.args.get("category", "")
+    if category not in PAGE_CATEGORIES:
+        category = ""
+    rows = page_rows()
+    if category:
+        rows = [row for row in rows if (row.get("category") or "") == category]
     return render_template(
         "pages.html",
-        pages=page_rows(),
+        pages=rows,
         my_pages=pages_for(viewer["id"]) if viewer else [],
         needs_migration=not gplus2_schema(),
         max_name=MAX_PAGE_NAME,
         max_tagline=MAX_PAGE_TAGLINE,
         max_about=MAX_PAGE_ABOUT,
+        categories=PAGE_CATEGORIES,
+        category=category,
+        can_extras=gplus3_schema(),
     )
 
 
@@ -6552,6 +8458,9 @@ def create_page():
     slug = request.form.get("slug", "").strip().lower()
     tagline = request.form.get("tagline", "").strip()
     about = request.form.get("about", "").strip()
+    category = request.form.get("category", "")
+    if category not in PAGE_CATEGORIES:
+        category = ""
     if not 1 <= len(name) <= MAX_PAGE_NAME:
         flash(f"A page needs a name of 1-{MAX_PAGE_NAME} characters.", "error")
         return redirect(url_for("pages"))
@@ -6587,6 +8496,10 @@ def create_page():
         " VALUES (?, ?, 'owner')",
         created["id"], user["id"],
     )
+    if gplus3_schema():
+        safe_execute(
+            "UPDATE pages SET category=? WHERE id=?", category or None, created["id"]
+        )
     flash(f"Page \"{name}\" created.", "success")
     return redirect(url_for("page_detail", slug=slug))
 
@@ -6610,6 +8523,68 @@ def page_detail(slug):
         can_manage=can_manage_page(row, viewer),
         is_owner=bool(viewer and row["owner_id"] == viewer["id"]),
         post_count=page_post_count(row["id"]),
+        followers=page_follower_count(row["id"]),
+        is_following=is_following_page(row["id"], viewer_id),
+        follower_people=page_follower_rows(row["id"], 12),
+    )
+
+
+@app.post("/pages/<slug>/follow")
+@login_required
+def follow_page(slug):
+    """Follow or unfollow a Page: the button toggles, like every other follow."""
+    if not gplus3_schema():
+        flash("Following Pages needs the newest database migration.", "error")
+        return redirect(url_for("page_detail", slug=slug))
+    row = page_by_slug(slug)
+    if not row:
+        abort(404)
+    viewer = current_user()
+    if is_following_page(row["id"], viewer["id"]):
+        safe_execute(
+            "DELETE FROM page_follows WHERE page_id=? AND user_id=?",
+            row["id"], viewer["id"],
+        )
+        flash(f"You stopped following {row['name']}.", "success")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO page_follows (page_id, user_id) VALUES (?, ?)",
+            row["id"], viewer["id"],
+        )
+        notify(
+            row["owner_id"], "page", viewer["id"],
+            link=url_for("page_detail", slug=slug),
+        )
+        flash(f"You are following {row['name']}.", "success")
+    return redirect(url_for("page_detail", slug=slug))
+
+
+@app.route("/pages/<slug>/followers")
+def page_followers(slug):
+    row = page_by_slug(slug)
+    if not row:
+        abort(404)
+    return render_template(
+        "page_followers.html", page=row,
+        people=page_follower_rows(row["id"], 200),
+    )
+
+
+@app.route("/pages/<slug>/insights")
+@login_required
+def page_insights(slug):
+    row = page_by_slug(slug)
+    if not row:
+        abort(404)
+    if not can_manage_page(row, current_user()):
+        flash("Only a page's managers can see its insights.", "error")
+        return redirect(url_for("page_detail", slug=slug))
+    top_posts = page_posts(row, current_user()["id"], limit=8)
+    return render_template(
+        "page_insights.html", page=row,
+        stats=page_insight_stats(row["id"]) or {},
+        top_posts=top_posts,
+        follower_people=page_follower_rows(row["id"], 12),
     )
 
 
@@ -6628,6 +8603,9 @@ def edit_page(slug):
         name = request.form.get("name", "").strip()
         tagline = request.form.get("tagline", "").strip()
         about = request.form.get("about", "").strip()
+        category = request.form.get("category", "")
+        if category not in PAGE_CATEGORIES:
+            category = ""
         if not 1 <= len(name) <= MAX_PAGE_NAME:
             flash(f"A page needs a name of 1-{MAX_PAGE_NAME} characters.", "error")
         elif len(tagline) > MAX_PAGE_TAGLINE or len(about) > MAX_PAGE_ABOUT:
@@ -6641,6 +8619,8 @@ def edit_page(slug):
                 flash(avatar_error or banner_error, "error")
             else:
                 fields = {"name": name, "tagline": tagline or None, "about": about or None}
+                if gplus3_schema():
+                    fields["category"] = category or None
                 removed = []
                 if avatar:
                     fields["avatar"] = avatar
@@ -6865,11 +8845,22 @@ def create_hangout():
         flash(f"Give the hangout a title of 1-{MAX_HANGOUT_TITLE} characters.", "error")
         return redirect(url_for("hangouts"))
     room = jitsi_room_name()
-    safe_execute(
-        "INSERT INTO hangouts (owner_id, title, room, kind, youtube_url)"
-        " VALUES (?, ?, ?, ?, ?)",
-        current_user()["id"], title, room, kind, youtube_url or None,
-    )
+    scheduled = request.form.get("scheduled_at", "").strip().replace("T", " ")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", scheduled):
+        scheduled = ""
+    if gplus3_schema():
+        safe_execute(
+            "INSERT INTO hangouts (owner_id, title, room, kind, youtube_url, scheduled_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            current_user()["id"], title, room, kind, youtube_url or None,
+            scheduled or None,
+        )
+    else:
+        safe_execute(
+            "INSERT INTO hangouts (owner_id, title, room, kind, youtube_url)"
+            " VALUES (?, ?, ?, ?, ?)",
+            current_user()["id"], title, room, kind, youtube_url or None,
+        )
     created = safe_first("SELECT id FROM hangouts WHERE room=?", room)
     if not created:
         flash("The hangout could not be created.", "error")
@@ -6894,7 +8885,35 @@ def hangout(room):
         is_owner=bool(viewer and viewer["id"] == row["owner_id"]),
         video_id=youtube_id(row.get("youtube_url")),
         jitsi_url=f"https://meet.jit.si/{row['room']}",
+        invites=hangout_invite_rows(row["id"]),
+        invited=hangout_invited(row["id"], viewer["id"] if viewer else 0),
     )
+
+
+@app.post("/hangouts/<room>/invite")
+@login_required
+def invite_hangout(room):
+    if not gplus3_schema():
+        flash("Hangout invitations need the newest database migration.", "error")
+        return redirect(url_for("hangout", room=room))
+    row = hangout_by_room(room)
+    if not row:
+        abort(404)
+    viewer = current_user()
+    if row["owner_id"] != viewer["id"]:
+        flash("Only the host can invite people to this hangout.", "error")
+        return redirect(url_for("hangout", room=room))
+    username = request.form.get("username", "").strip().lstrip("@")
+    person = first(
+        "SELECT id, display_name, deleted_at FROM users WHERE username=? COLLATE NOCASE",
+        username,
+    )
+    if not person or person.get("deleted_at"):
+        flash("There is no account by that name.", "error")
+    else:
+        invite_to_hangout(row, viewer, person)
+        flash(f"Invited {person['display_name']}.", "success")
+    return redirect(url_for("hangout", room=room))
 
 
 @app.post("/hangouts/<room>/end")

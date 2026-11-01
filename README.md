@@ -209,10 +209,22 @@ tinted and pushed right, theirs flat on the left, and `Seen` marks a message the
 opened. The rail carries the unread count, an unread row is tinted and badged **N new**, and the
 open thread is ruled on its left. **Mark all read** clears the lot.
 
-The left column is the same on all three screens - the inbox, an open thread and the first message
-to somebody new - so moving between conversations never loses your place, and the whole thing comes
-from one template (`messages.html`, whose right-hand pane `conversation.html` fills in) rather than
-three that drift apart. The inbox opens on an empty pane instead of jumping into the newest
+**Group Hangouts** share that list and that pane. **New group** in the list opens
+`/messages/group/new`, which takes a title and a handful of handles; the group then opens at
+`/messages/g/<id>` in the same two-pane screen, with a member strip, an options drawer
+(rename, add somebody, leave) and a **Start a call** button that makes a Jitsi room with
+everybody in it and posts the link into the thread (`chat.html`, `chat_threads` /
+`chat_members` in migration 0018). A group message stores the sender as its own recipient;
+unread state lives on `chat_members.last_read_at`, so each member's badge is their own.
+Bubbles in a group carry the sender's name, and a sent picture stays inside the bubble.
+
+DM threads gained the same attachments and a call button, and the conversation list shows
+**Group Hangouts** under the one-to-one rows.
+
+The left column is the same on all of these screens - the inbox, an open DM, the first message
+to somebody new, a group and its first-message form - so moving between conversations never
+loses your place, and the whole thing comes from one template (`messages.html`, whose right-hand
+pane `conversation.html` or `chat.html` fills in) rather than screens that drift apart. The inbox opens on an empty pane instead of jumping into the newest
 conversation, because opening a thread is what marks it read: a moderation notice must not be
 marked read by a page nobody chose to open. A conversation starts from the **Message** button on
 anybody's profile (beside Follow) or from the box at the top of the list, which takes a handle.
@@ -716,6 +728,40 @@ remove ordinary members but cannot change roles or remove another moderator.
 **Embedding a post**: every post page has an *Embed* box with an `<iframe>` snippet for
 `/post/<row id>/embed`, a bare page showing just the post for another site.
 
+Migration `0018_hangouts_and_the_rest.sql` finishes the 2019 product. It is read through
+`gplus3_schema()`, so - exactly like 0016 and 0017 - code can deploy before the migration
+without breaking anything.
+
+**Account recovery and sessions.** Settings → **Account & security** (`/settings/account`) holds the handle,
+password change, two-step verification and **sign out everywhere**. `/forgot-password` queues a
+reset link (only the SHA-256 of the token is stored, and it expires in `RESET_TOKEN_MINUTES`),
+`/reset-password/<token>` sets the new password and signs out every other device, and
+`/verify-email/<token>` marks the address verified after a click. Two-step verification
+(`/settings/two-factor`) takes any TOTP authenticator app: the page shows the setup secret and
+the `otpauth://` link rather than a QR image, so the secret is never handed to a third-party
+image service. Eight single-use recovery codes are shown once and stored hashed; `/two-factor`
+accepts either a code or one of them on sign-in. `users.session_epoch` is what makes signing
+out everywhere work: a cookie carrying an older epoch is refused on the next request.
+
+**Posts.** The composer can schedule a post (`status = scheduled` plus `publish_at`; every
+stream checks for due posts on read, so no Cron trigger is needed), attach a poll of two to six
+choices, and editing keeps the previous title and body in `post_revisions`, shown to the
+author as **Edit history**. Comments and replies accept a picture, and `#hashtag` pages have a
+**Follow #tag** button that rings the bell on new posts with it.
+
+**Communities** gained a category, avatar, banner, rules and a join policy (open, approval,
+invite-only) - `/c/<slug>/settings` is the owner's screen, `/c/<slug>/moderation` the report
+queue, and the community page itself shows rules, pending requests and its events.
+
+**Pages** gained a category, verification badge and followers: **Follow page**
+(`/pages/<slug>/followers`) feeds the following stream, and managers get `/pages/<slug>/insights`
+with posts, followers, +1 score, comments and shares.
+
+**Events** gained a cover, an optional community, invitations and a calendar file
+(`/events/<id>/calendar.ics`). **Hangouts** gained invitation lists and an optional scheduled
+time. **Comment pictures** live in `comment_images` and are fetched in one query per post
+rather than one per comment.
+
 **Still not built**, and why:
 
 | Not built | Why |
@@ -737,17 +783,18 @@ npm run db:remote    # the same against production D1
 Add a new numbered file (for example `migrations/0007_add_post_tags.sql`) instead of editing
 one that has already been applied. Migrations run in filename order.
 
-**Migrations 0016, 0017 and pushes.** The GitHub Action deploys code and never migrations, so
-a push that carries a revival feature lands before its tables do. That order is safe on
-purpose: every revival-only read is gated on `gplus_schema()` (0016) or `gplus2_schema()`
-(0017), so the deployed site keeps its old feed and hides the new rail links until you run:
+**Migrations 0016, 0017, 0018 and pushes.** The GitHub Action deploys code and never
+migrations, so a push that carries a revival feature lands before its tables do. That order is
+safe on purpose: every revival-only read is gated on `gplus_schema()` (0016),
+`gplus2_schema()` (0017) or `gplus3_schema()` (0018), so the deployed site keeps its old feed
+and hides the new screens until you run:
 
 ```bash
 npm run db:remote
 ```
 
-The command applies every pending migration in filename order, so one run covers both. Running
-it before the deploy is still tidier - the new screens appear the moment the deploy finishes
+The command applies every pending migration in filename order, so one run covers all of them.
+Running it before the deploy is still tidier - the new screens appear the moment the deploy finishes
 instead of after a manual step.
 
 ## Deploy
@@ -757,7 +804,7 @@ npm run deploy       # uv run pywrangler deploy
 ```
 
 After a schema change, apply it to the remote database with `npm run db:remote` (for migrations
-0016 and 0017, before the deploy if you can: see ["Schema changes"](#schema-changes)).
+0016-0018, before the deploy if you can: see ["Schema changes"](#schema-changes)).
 The email digest is optional and off until `EMAIL_API_KEY` / `EMAIL_FROM` are set as Worker
 secrets or variables; Jitsi rooms need no configuration at all.
 To put the Worker on your own domain, add a `routes` entry to `wrangler.jsonc`:

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import small_avatar with context %}
+{% block title %}Moderation for c/{{ community.slug }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow">MODERATION</p>
+  <h1>c/{{ community.slug }}</h1>
+  <p class="muted"><a href="{{ url_for('community', slug=community.slug) }}">Back to the community</a>
+    · {{ reports|length }} open report{% if reports|length != 1 %}s{% endif %}</p>
+</div>
+
+{# Reports -------------------------------------------------------------------- #}
+<section class="settings-card">
+  <h2>Open reports</h2>
+  {% for item in reports %}
+    <article class="report-row">
+      <div class="report-head">
+        <span class="badge badge-ban">{{ item.kind|capitalize }}</span>
+        <strong>
+          {% if item.reporter_username %}
+            @{{ item.reporter_username }}
+          {% else %}
+            A deleted account
+          {% endif %}
+          reported {% if item.comment_id %}a comment{% else %}a post{% endif %}
+        </strong>
+        <span class="muted">· {{ (item.created_at or '')[:16] }} UTC</span>
+      </div>
+      <p class="report-reason">{{ item.reason }}</p>
+      {% if item.comment_content %}
+        <blockquote>{{ item.comment_content|truncate(300) }}</blockquote>
+      {% endif %}
+      <div class="report-actions">
+        {% if item.post_id %}
+          <a class="button small secondary"
+             href="{{ url_for('post_legacy', post_id=item.post_id) }}{% if item.comment_id %}#comment-{{ item.comment_id }}{% endif %}">
+            Open the {% if item.comment_id %}comment{% else %}post{% endif %}</a>
+        {% endif %}
+        {% if item.post_title %}
+          <span class="muted report-title">{{ item.post_title }}</span>
+        {% endif %}
+        <form method="post"
+              action="{{ url_for('resolve_community_report', slug=community.slug, report_id=item.id) }}">
+          <button class="link-button" type="submit">Mark handled</button>
+        </form>
+      </div>
+    </article>
+  {% else %}
+    <p class="muted">Nothing reported right now. Reports from the post and comment
+      menus land here.</p>
+  {% endfor %}
+</section>
+
+{# Pending members are on the community page itself, where the person asking can
+   see their own state; this links across rather than duplicating the controls. #}
+<section class="settings-card">
+  <h2>Join requests</h2>
+  <p class="muted">Approve or decline people waiting to get in from the community's
+    member list. Changing who can join is on
+    <a href="{{ url_for('community_settings', slug=community.slug) }}">community settings</a>.</p>
+  <div class="settings-links">
+    <a class="button" href="{{ url_for('community', slug=community.slug) }}#pending">Review requests</a>
+  </div>
+</section>
+{% endblock %}

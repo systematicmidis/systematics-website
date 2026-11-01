@@ -28,6 +28,13 @@
           <input name="youtube_url" placeholder="https://www.youtube.com/watch?v=...">
           <span class="muted">Optional. The video is embedded beside the room.</span>
         </label>
+        {% if gplus %}
+          <label>When (optional)
+            <input type="datetime-local" name="scheduled_at">
+            <span class="muted">Leave empty to start now. A scheduled room is still
+              joinable straight away; the time is just what invitees see.</span>
+          </label>
+        {% endif %}
         <div class="actions"><button type="submit">Create room</button></div>
       </form>
     </section>

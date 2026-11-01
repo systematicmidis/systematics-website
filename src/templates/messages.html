@@ -13,18 +13,25 @@
 
    A notice from the site is an ordinary conversation with the moderation
    account, so it sits in this same list. #}
-{% set pane_open = selected or composing %}
+{% set pane_open = selected or selected_chat or composing %}
 <div class="dm-shell{% if pane_open %} has-pane{% endif %}">
 
   <aside class="dm-list">
     <div class="dm-list-head">
       <h1>Messages</h1>
       {% if unread %}<span class="badge badge-new">{{ unread }} unread</span>{% endif %}
-      {% if unread %}
-        <form class="dm-tools" method="post" action="{{ url_for('read_messages') }}">
-          <button type="submit" title="Mark every conversation read">Mark all read</button>
-        </form>
-      {% endif %}
+      <div class="dm-tools">
+        {# A Hangout is a group thread - the same two-pane screen with more than
+           one person in the right-hand side. #}
+        {% if gplus and current_user %}
+          <a class="button small secondary" href="{{ url_for('new_group_chat') }}">＋ New group</a>
+        {% endif %}
+        {% if unread %}
+          <form method="post" action="{{ url_for('read_messages') }}">
+            <button type="submit" title="Mark every conversation read">Mark all read</button>
+          </form>
+        {% endif %}
+      </div>
     </div>
 
     {# Start a conversation by handle. The profile pages have the same control,
@@ -74,6 +81,42 @@
             the Message button on anybody's profile.</p>
         {% endfor %}
       </section>
+
+      {% if chats %}
+      {# Group Hangouts. They share the list with one-to-one DMs: opening a person
+         opens a DM, opening a group opens the group, and the pane on the right is
+         whichever you picked. #}
+      <div class="section-heading notices-heading">
+        <h2>Group Hangouts</h2><span>{{ chats|length }}</span>
+      </div>
+      <section class="message-list conversation-list">
+        {% for item in chats %}
+          <a class="message-row conversation-row{% if item.unread %} is-unread{% endif %}{% if selected_chat == item.id %} is-open{% endif %}"
+             href="{{ url_for('group_chat', chat_id=item.id) }}">
+            <span class="message-who">
+              <span class="avatar small-avatar group-avatar" aria-hidden="true">◎</span>
+            </span>
+            <span class="message-main">
+              <span class="message-top">
+                <strong>{{ item.title }}</strong>
+                {% if item.my_role == 'owner' %}<span class="badge badge-joined">yours</span>{% endif %}
+                {% if item.unread %}<span class="badge badge-new">{{ item.unread }} new</span>{% endif %}
+              </span>
+              <span class="message-snippet">
+                {%- if item.last_sender_id == current_user.id %}<span class="snippet-prefix">You: </span>
+                {%- elif item.last_attachment and not item.last_body %}<span class="snippet-prefix">Photo</span>
+                {%- endif -%}
+                {{ item.last_body|message_preview if item.last_body else ('Attachment' if item.last_attachment else 'No messages yet') }}
+              </span>
+              <span class="message-from">
+                {{ item.member_count }} member{% if item.member_count != 1 %}s{% endif %}
+              </span>
+            </span>
+            <span class="message-when">{{ (item.last_at or item.created_at or '')[:16] }}</span>
+          </a>
+        {% endfor %}
+      </section>
+      {% endif %}
 
       {% if notices %}
       {# Notices written before the site had an account to write them as. They have no

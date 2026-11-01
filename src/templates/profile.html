@@ -14,7 +14,8 @@
   </div>
   <div class="profile-info">
     {% if user.profile_picture %}
-      <img class="profile-avatar avatar-img" src="{{ url_for('uploads', filename=user.profile_picture) }}" alt="">
+      <img class="profile-avatar avatar-img" src="{{ url_for('uploads', filename=user.profile_picture) }}" alt=""
+           style="object-position: center {{ user.avatar_position or 'center' }};">
     {% else %}
       <div class="profile-avatar">{{ user.display_name[:1]|upper }}</div>
     {% endif %}

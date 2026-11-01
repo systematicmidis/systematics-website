@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import small_avatar with context %}
+{% block title %}Settings for c/{{ community.slug }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow">COMMUNITY SETTINGS</p>
+  <h1>c/{{ community.slug }}</h1>
+  <p class="muted"><a href="{{ url_for('community', slug=community.slug) }}">Back to the community</a>
+    · only the owner can change these</p>
+</div>
+
+<form class="settings-card" method="post" enctype="multipart/form-data">
+  <h2>The basics</h2>
+  <label>Name
+    <input name="name" value="{{ community.name }}" maxlength="{{ max_name }}" required>
+    <small>Up to {{ max_name }} characters. The address stays c/{{ community.slug }}.</small>
+  </label>
+  <label>Category
+    <select name="category">
+      <option value="">No category</option>
+      {% for item in categories %}
+        <option value="{{ item }}" {% if community.category == item %}selected{% endif %}>{{ item }}</option>
+      {% endfor %}
+    </select>
+    <small>Categories are how people browse communities that are not theirs yet.</small>
+  </label>
+  <label>Description
+    <textarea name="description" rows="3" maxlength="{{ max_description }}"
+              placeholder="What is this community for?">{{ community.description or '' }}</textarea>
+  </label>
+  <label>Who can join
+    <select name="join_policy">
+      {% for value, label in join_policies.items() %}
+        <option value="{{ value }}" {% if (community.join_policy or 'open') == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <small>An approval community puts requests in the moderator queue; an invite-only
+      one is joined only when a moderator adds somebody.</small>
+  </label>
+
+  <h2>Rules</h2>
+  <label>Community rules
+    <textarea name="rules" rows="8" maxlength="{{ max_rules }}"
+              placeholder="One rule per line. These show on the community page.">{{ community.rules or '' }}</textarea>
+    <small>Up to {{ max_rules }} characters. Shown to everybody who opens the
+      community, and to people asking to join.</small>
+  </label>
+
+  <h2>Branding</h2>
+  <div class="settings-media">
+    <label>Avatar
+      {% if community.avatar %}
+        <img class="settings-thumb" src="{{ url_for('uploads', filename=community.avatar) }}" alt="">
+        <span class="checkbox"><input type="checkbox" name="remove_avatar" value="1"> Remove the current avatar</span>
+      {% endif %}
+      <input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp">
+    </label>
+    <label>Banner
+      {% if community.banner %}
+        <img class="settings-thumb wide" src="{{ url_for('uploads', filename=community.banner) }}" alt="">
+        <span class="checkbox"><input type="checkbox" name="remove_banner" value="1"> Remove the current banner</span>
+      {% endif %}
+      <input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp">
+    </label>
+  </div>
+
+  <div class="actions">
+    <button type="submit">Save community</button>
+    <a href="{{ url_for('community', slug=community.slug) }}">Cancel</a>
+  </div>
+</form>
+
+<section class="settings-card">
+  <h2>Moderation</h2>
+  <p class="muted">Reports on posts and comments in this community, plus the queue of
+    people waiting to be let in.</p>
+  <div class="settings-links">
+    <a class="button" href="{{ url_for('community_moderation', slug=community.slug) }}">Open moderation</a>
+  </div>
+</section>
+{% endblock %}

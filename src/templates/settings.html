@@ -56,6 +56,8 @@
       <a class="button" href="{{ url_for('profile_settings') }}">Edit profile</a>
       <a class="button" href="{{ url_for('profile', username=current_user.username) }}">My profile</a>
       <a class="button" href="{{ url_for('followers', username=current_user.username) }}">My followers</a>
+      {# Handle, password, two-step verification and every signed-in device. #}
+      <a class="button" href="{{ url_for('account_settings') }}">Account &amp; security</a>
       {# Takeout, in the one form a static Worker can give it: a JSON file with
          the profile, posts, comments, follows, circles and collections. #}
       {% if gplus %}

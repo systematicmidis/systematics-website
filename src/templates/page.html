@@ -16,14 +16,27 @@
     {% endif %}
     <div class="profile-name-row">
       <div>
-        <h1>{{ page.name }} <span class="badge badge-joined">Page</span></h1>
-        <div class="username">/pages/{{ page.slug }}</div>
+        <h1>{{ page.name }} <span class="badge badge-joined">Page</span>
+          {%- if page.verified %} <span class="badge badge-verified" title="A verified page">✔ Verified</span>{% endif %}</h1>
+        <div class="username">/pages/{{ page.slug }}
+          {%- if page.category %} · <span class="badge badge-community">{{ page.category }}</span>{% endif %}</div>
         {% if page.tagline %}<p class="profile-tagline">{{ page.tagline }}</p>{% endif %}
       </div>
       <div class="profile-actions">
+        {% if current_user and not is_owner and gplus %}
+          {# Following a Page is the same toggle as following a person: posts it
+             makes reach the following stream, and its bell rings on the first one. #}
+          <form method="post" action="{{ url_for('follow_page', slug=page.slug) }}">
+            <button class="button{% if not is_following %} secondary{% endif %}" type="submit">
+              {{ 'Following' if is_following else 'Follow page' }}</button>
+          </form>
+        {% endif %}
         {% if can_manage %}
           <a class="button" href="{{ url_for('edit_page', slug=page.slug) }}">Edit page</a>
           <a class="button" href="{{ url_for('new_post') }}">Write as this page</a>
+          {% if gplus %}
+            <a class="button secondary" href="{{ url_for('page_insights', slug=page.slug) }}">Insights</a>
+          {% endif %}
         {% endif %}
         {% if is_owner %}
           <form method="post" action="{{ url_for('delete_page', slug=page.slug) }}"
@@ -36,8 +49,21 @@
     {% if page.about %}<p class="profile-bio">{{ page.about|linkify }}</p>{% endif %}
     <div class="profile-stats">
       <span><strong>{{ post_count }}</strong> post{% if post_count != 1 %}s{% endif %}</span>
+      <a href="{{ url_for('page_followers', slug=page.slug) }}"><strong>{{ followers }}</strong>
+        follower{% if followers != 1 %}s{% endif %}</a>
       <span>Owned by <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a></span>
     </div>
+    {% if follower_people %}
+      <div class="follower-strip">
+        {% for person in follower_people %}
+          <a class="follower-chip" href="{{ url_for('profile', username=person.username) }}"
+             title="{{ person.display_name }}">
+            {{ small_avatar(person.profile_picture, person.display_name) }}
+            <span>{{ person.display_name }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
   </div>
 </div>
 

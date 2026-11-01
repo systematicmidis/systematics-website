@@ -2,33 +2,97 @@
 {% from "_widgets.html" import post_card, small_avatar with context %}
 {% block title %}c/{{ community.slug }} · Systematics Black Midi site{% endblock %}
 {% block content %}
+{% if community.banner %}
+  <img class="profile-banner community-banner" src="{{ url_for('uploads', filename=community.banner) }}" alt="">
+{% endif %}
 <div class="community-header">
   <div class="community-title">
-    <span class="community-badge">c/</span>
+    {% if community.avatar %}
+      <img class="community-avatar avatar-img" src="{{ url_for('uploads', filename=community.avatar) }}" alt="">
+    {% else %}
+      <span class="community-badge">c/</span>
+    {% endif %}
     <div>
-      <h1>{{ community.name }}</h1>
+      <h1>{{ community.name }}
+        {% if community.category %}<span class="badge badge-community">{{ community.category }}</span>{% endif %}
+      </h1>
       <p class="muted">Started by <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a>
-        · {{ members|length }} member{% if members|length != 1 %}s{% endif %}</p>
+        · {{ members|length }} member{% if members|length != 1 %}s{% endif %}
+        {%- if can_manage %} · {{ join_policies.get(community.join_policy or 'open', 'Anyone can join') }}{% endif %}</p>
     </div>
   </div>
-  {% if current_user %}
-    {% if membership %}
-      <form method="post" action="{{ url_for('leave_community', slug=community.slug) }}">
-        <button class="button secondary" type="submit">{{ 'Leave' if membership.role != 'owner' else 'You own this' }}</button>
-      </form>
-    {% else %}
-      <form method="post" action="{{ url_for('join_community', slug=community.slug) }}">
-        <button class="button" type="submit">Join community</button>
-      </form>
+  <div class="community-actions">
+    {% if current_user %}
+      {% if membership and (membership.status or 'active') == 'pending' %}
+        <span class="badge badge-joined">Request sent - a moderator decides</span>
+      {% elif membership %}
+        <form method="post" action="{{ url_for('leave_community', slug=community.slug) }}">
+          <button class="button secondary" type="submit">{{ 'Leave' if membership.role != 'owner' else 'You own this' }}</button>
+        </form>
+      {% else %}
+        <form method="post" action="{{ url_for('join_community', slug=community.slug) }}">
+          <button class="button" type="submit">{{ 'Ask to join' if (community.join_policy or 'open') == 'approval' else 'Join community' }}</button>
+        </form>
+      {% endif %}
     {% endif %}
-  {% endif %}
+    {% if can_manage %}
+      <a class="button small secondary" href="{{ url_for('community_moderation', slug=community.slug) }}">
+        Moderation{% if report_count %} ({{ report_count }}){% endif %}</a>
+      {% if is_community_owner %}
+        <a class="button small secondary" href="{{ url_for('community_settings', slug=community.slug) }}">Settings</a>
+      {% endif %}
+    {% endif %}
+  </div>
 </div>
 
-{% if community.description %}<p class="community-about">{{ community.description }}</p>{% endif %}
+{% if community.description %}<p class="community-about">{{ community.description|linkify }}</p>{% endif %}
 
-{% if membership %}
+{% if community.rules %}
+  {# The rules are part of the community, not a settings screen: somebody deciding\n     whether to join reads them here. #}
+  <details class="community-rules">
+    <summary>Community rules</summary>
+    <div class="rules-body">{{ community.rules|linkify }}</div>
+  </details>
+{% endif %}
+
+{% if membership and (membership.status or 'active') == 'active' %}
   <div class="feed-cta"><a class="button" href="{{ url_for('new_post') }}">＋ Post in this community</a>
     <span class="muted">Choose c/{{ community.slug }} under Community in the editor.</span></div>
+{% endif %}
+
+{% if pending %}
+  {# Only a moderator is handed this list, and the query above only asks for it\n     when they are one. #}
+  <section class="settings-card" id="pending">
+    <h2>Waiting to join ({{ pending|length }})</h2>
+    {% for person in pending %}
+      <div class="member-row">
+        <a class="member-identity" href="{{ url_for('profile', username=person.username) }}">
+          {{ small_avatar(person.profile_picture, person.display_name) }}
+          <span>{{ person.display_name }}</span>
+        </a>
+        <div class="member-controls">
+          <form method="post" action="{{ url_for('approve_community_member', slug=community.slug, user_id=person.id) }}">
+            <button class="link-button" type="submit">Approve</button>
+          </form>
+          <form method="post" action="{{ url_for('deny_community_member', slug=community.slug, user_id=person.id) }}">
+            <button class="link-button danger" type="submit">Decline</button>
+          </form>
+        </div>
+      </div>
+    {% endfor %}
+  </section>
+{% endif %}
+
+{% if events %}
+  <div class="section-label">Community events</div>
+  <div class="collection-strip">
+    {% for item in events %}
+      <a class="collection-card" href="{{ url_for('event', event_id=item.id) }}">
+        <span class="collection-name">{{ item.title }}</span>
+        <span class="collection-count">{{ (item.starts_at or '')[:16] }} UTC</span>
+      </a>
+    {% endfor %}
+  </div>
 {% endif %}
 
 {% if is_community_owner %}
@@ -78,6 +142,15 @@
     {% else %}
       <p class="muted">Just the owner so far.</p>
     {% endfor %}
+
+    {% if can_manage %}
+      <div class="section-label">Add somebody</div>
+      <form class="inline-form" method="post" action="{{ url_for('invite_community_member', slug=community.slug) }}">
+        <input name="username" placeholder="@handle" maxlength="24" required>
+        <button type="submit">Add</button>
+      </form>
+      <p class="muted small-note">Adding is how an invite-only community gets members.</p>
+    {% endif %}
   </aside>
 </div>
 {% endblock %}

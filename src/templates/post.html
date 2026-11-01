@@ -15,6 +15,16 @@
       <span>@{{ comment.username }} · <a class="post-stamp" href="{{ post_url(post) }}#comment-{{ comment.id }}">{{ comment.created_at }}</a></span>{% endif %}
     </div>
     <p>{{ comment.content|linkify }}</p>
+    {% if comment.images %}
+      <div class="comment-images">
+        {% for image in comment.images %}
+          <a href="{{ url_for('uploads', filename=image.filename) }}"
+             data-lightbox="comment-{{ comment.id }}">
+            <img src="{{ url_for('uploads', filename=image.filename) }}" alt="" loading="lazy">
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
     <div class="comment-actions">
       {% if viewer %}
         <form class="comment-vote" method="post" action="{{ url_for('vote_comment', comment_id=comment.id) }}">
@@ -28,11 +38,14 @@
       {% if viewer and not post.locked %}
         <details class="reply-box">
           <summary>Reply</summary>
-          <form class="comment-form compact" method="post">
+          <form class="comment-form compact" method="post" enctype="multipart/form-data">
             <input type="hidden" name="parent_id" value="{{ comment.id }}">
             <div class="comment-inputs">
               <textarea name="content" maxlength="2000" rows="2"
                         placeholder="Reply to {{ comment.display_name }}..." required></textarea>
+              <label class="comment-attach" title="Attach a picture">
+                <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp">
+              </label>
               <button type="submit">Reply</button>
             </div>
           </form>
@@ -171,6 +184,40 @@
     {% endif %}
   </div>
 
+  {% if poll %}
+    {# A poll is one vote per account; picking another choice moves the vote. The
+       result bars are the same widths whether or not the viewer has voted, so the
+       page does not need two layouts. #}
+    <section class="poll-card" id="poll">
+      <h3>Poll</h3>
+      <ul class="poll-options">
+        {% for option in poll.options %}
+          <li>
+            {% if current_user %}
+              <form method="post" action="{{ url_for('vote_poll', post_id=post.id) }}">
+                <input type="hidden" name="option_id" value="{{ option.id }}">
+                <button class="poll-choice{% if poll.my_option == option.id %} is-mine{% endif %}"
+                        type="submit">
+                  <span class="poll-bar" style="width:{{ option.percent }}%" aria-hidden="true"></span>
+                  <span class="poll-label">{{ option.label }}</span>
+                  <span class="poll-count">{{ option.percent }}%</span>
+                </button>
+              </form>
+            {% else %}
+              <span class="poll-choice is-static">
+                <span class="poll-bar" style="width:{{ option.percent }}%" aria-hidden="true"></span>
+                <span class="poll-label">{{ option.label }}</span>
+                <span class="poll-count">{{ option.percent }}%</span>
+              </span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="muted">{{ poll.total }} vote{% if poll.total != 1 %}s{% endif %}
+        {% if not current_user %}· <a href="{{ url_for('login', next=post_url(post) ~ '#poll') }}">Sign in</a> to vote{% endif %}</p>
+    </section>
+  {% endif %}
+
   {{ vote_bar(post) }}
 
   <div class="post-actions">
@@ -204,6 +251,22 @@
       {% endif %}
     {% endif %}
   </div>
+
+  {% if revisions %}
+    {# Every edit a manager or the author saved, newest first. Only the people who
+       can edit the post see it, so the history is not a public diff. #}
+    <details class="revision-box">
+      <summary>Edit history ({{ revisions|length }})</summary>
+      {% for revision in revisions %}
+        <div class="revision-row">
+          <span class="muted">{{ (revision.created_at or '')[:16] }} UTC
+            {% if revision.editor_name %}· {{ revision.editor_name }}{% endif %}</span>
+          <strong>{{ revision.title }}</strong>
+          <p class="muted">{{ revision.content|striptags|truncate(240) }}</p>
+        </div>
+      {% endfor %}
+    </details>
+  {% endif %}
 
   {% if can_manage and albums %}
     <details class="album-box">
@@ -267,11 +330,15 @@
       {% elif my_bans.comment %}
         <div class="login-to-comment banned">{{ ban_message('comment', my_bans.comment) }}</div>
       {% else %}
-      <form class="comment-form" method="post">
+      <form class="comment-form" method="post" enctype="multipart/form-data">
         {{ small_avatar(current_user.profile_picture, current_user.display_name) }}
         <div class="comment-inputs">
           <textarea name="content" maxlength="2000" rows="3"
                     placeholder="Write a comment as {{ current_user.display_name }}..." required></textarea>
+          <label class="comment-attach" title="Attach a picture">
+            <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp">
+            <span aria-hidden="true">📎 Photo</span>
+          </label>
           <button type="submit">Post comment</button>
         </div>
       </form>

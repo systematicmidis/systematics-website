@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import post_card, small_avatar with context %}
+{% block title %}Insights for {{ page.name }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow">PAGE INSIGHTS</p>
+  <h1>{{ page.name }}</h1>
+  <p class="muted"><a href="{{ url_for('page_detail', slug=page.slug) }}">Back to the page</a>
+    · only the page's managers see this</p>
+</div>
+
+<section class="settings-card">
+  <h2>The numbers</h2>
+  <div class="owner-stats">
+    {% for label, value in [
+        ('Posts', stats.get('posts', 0)),
+        ('Followers', stats.get('followers', 0)),
+        ('+1 score', stats.get('score', 0)),
+        ('Comments', stats.get('comments', 0)),
+        ('Shares', stats.get('shares', 0)),
+    ] %}
+      <div class="owner-stat">
+        <span class="owner-stat-value">{{ value }}</span>
+        <span class="owner-stat-label">{{ label }}</span>
+      </div>
+    {% endfor %}
+  </div>
+  <p class="muted small-note">A +1 score is the sum of every like and dislike on
+    the page's posts; a share is a repost somebody made of one of them.</p>
+</section>
+
+<section class="settings-card">
+  <h2>Newest followers</h2>
+  {% if follower_people %}
+    <div class="follower-strip">
+      {% for person in follower_people %}
+        <a class="follower-chip" href="{{ url_for('profile', username=person.username) }}">
+          {{ small_avatar(person.profile_picture, person.display_name) }}
+          <span>{{ person.display_name }}</span>
+        </a>
+      {% endfor %}
+    </div>
+    <div class="settings-links">
+      <a class="button secondary" href="{{ url_for('page_followers', slug=page.slug) }}">
+        Everyone who follows</a>
+    </div>
+  {% else %}
+    <p class="muted">Nobody follows the page yet.</p>
+  {% endif %}
+</section>
+
+<section class="settings-card">
+  <h2>Recent posts</h2>
+  {% for item in top_posts %}
+    {{ post_card(item) }}
+  {% else %}
+    <p class="muted">This page has not posted yet. Write as it from the editor's
+      "Post as" box.</p>
+  {% endfor %}
+</section>
+{% endblock %}

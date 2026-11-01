@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Account &amp; security · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header settings-header">
+  <h1>Account &amp; security</h1>
+  <p>Your handle, your password, two-step verification and every device you are
+    signed in on. <a href="{{ url_for('settings') }}">Back to settings</a>.</p>
+</div>
+
+{# Handle --------------------------------------------------------------------- #}
+<section class="settings-card">
+  <h2>Your handle</h2>
+  <p class="muted">This is the name in your profile address,
+    <code>/{{ user.user_id }}</code> and <code>@{{ user.username }}</code>.
+    {% if is_owner_username(user.username) %}
+      As the site owner your handle is fixed - it is what identifies the owner.
+    {% else %}
+      Changing it keeps your posts, followers and messages.
+    {% endif %}</p>
+  {% if is_owner_username(user.username) %}
+    <dl class="settings-facts">
+      <dt>Handle</dt><dd>@{{ user.username }} <span class="owner-tag">Site owner</span></dd>
+    </dl>
+  {% else %}
+    <form method="post" class="inline-form">
+      <input type="hidden" name="action" value="username">
+      <input name="username" value="{{ user.username }}" maxlength="24"
+             aria-label="New handle" required>
+      <button type="submit">Change handle</button>
+    </form>
+    <p class="muted small-note">3-24 letters, numbers or underscores. Old links to
+      @{{ user.username }} stop working once it changes.</p>
+  {% endif %}
+</section>
+
+{# Email ---------------------------------------------------------------------- #}
+<section class="settings-card">
+  <div class="settings-card-head">
+    <h2>Email address</h2>
+    {% if user.email %}
+      {% if email_verified %}
+        <span class="badge badge-verified">Verified</span>
+      {% else %}
+        <span class="badge badge-ban">Not verified</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% if user.email %}
+    <p class="muted"><code>{{ user.email }}</code> is where password resets and
+      notification mail go.</p>
+    {% if not email_verified %}
+      <form method="post" action="{{ url_for('resend_verification') }}">
+        <button type="submit">Send the verification link</button>
+      </form>
+      <p class="muted small-note">The link expires after {{ VERIFY_TOKEN_HOURS }} hours.</p>
+    {% endif %}
+    <p class="muted small-note">Change the address on
+      <a href="{{ url_for('notification_settings') }}">notification settings</a>.</p>
+  {% else %}
+    <p class="muted">No address on this account yet. Add one on
+      <a href="{{ url_for('notification_settings') }}">notification settings</a>
+      - without it there is no way to reset a forgotten password.</p>
+    <div class="settings-links">
+      <a class="button" href="{{ url_for('notification_settings') }}">Add an email address</a>
+    </div>
+  {% endif %}
+</section>
+
+{# Password ------------------------------------------------------------------- #}
+<section class="settings-card">
+  <h2>Password</h2>
+  <p class="muted">Changing it signs out every other device, including phones and
+    browsers you have forgotten about.</p>
+  <form method="post">
+    <input type="hidden" name="action" value="password">
+    <label>Current password
+      <input type="password" name="current_password" autocomplete="current-password" required>
+    </label>
+    <label>New password
+      <input type="password" name="password" autocomplete="new-password"
+             minlength="8" required>
+      <small>At least 8 characters.</small>
+    </label>
+    <label>Confirm new password
+      <input type="password" name="confirm_password" autocomplete="new-password"
+             minlength="8" required>
+    </label>
+    <button type="submit">Change password</button>
+  </form>
+</section>
+
+{# Two-step ------------------------------------------------------------------- #}
+<section class="settings-card">
+  <div class="settings-card-head">
+    <h2>Two-step verification</h2>
+    <span class="settings-current">Now:
+      <strong>{{ 'on' if two_factor else 'off' }}</strong></span>
+  </div>
+  {% if two_factor %}
+    <p class="muted">Signing in asks for a code from your authenticator app after
+      the password. You have
+      <strong>{{ recovery_left }}</strong> recovery code{% if recovery_left != 1 %}s{% endif %}
+      left{% if recovery_left == 0 %} - make a new set now{% endif %}.</p>
+    <div class="settings-links">
+      <form method="post" action="{{ url_for('regenerate_recovery_codes') }}" class="inline-form">
+        <input type="password" name="password" placeholder="Your password"
+               autocomplete="current-password" required>
+        <button type="submit">Make new recovery codes</button>
+      </form>
+    </div>
+    <details class="danger-details">
+      <summary>Turn it off</summary>
+      <p class="muted">Turning it off removes the codes on the authenticator app
+        from this account.</p>
+      <form method="post" action="{{ url_for('disable_two_factor') }}" class="inline-form">
+        <input type="password" name="password" placeholder="Your password"
+               autocomplete="current-password" required>
+        <button class="secondary" type="submit">Turn off two-step verification</button>
+      </form>
+    </details>
+  {% else %}
+    <p class="muted">Nothing but the password protects this account right now. Add a
+      code from an authenticator app as a second step.</p>
+    <div class="settings-links">
+      <a class="button" href="{{ url_for('two_factor_settings') }}">Set it up</a>
+    </div>
+  {% endif %}
+</section>
+
+{# Sessions ------------------------------------------------------------------- #}
+<section class="settings-card">
+  <h2>Signed-in devices</h2>
+  <p class="muted">Every device that carries this account's cookie is signed out by
+    this button - this one stays in. Use it if a phone or a library computer was
+    left signed in.</p>
+  <form method="post">
+    <input type="hidden" name="action" value="sign_out_everywhere">
+    <button class="secondary" type="submit">Sign out everywhere else</button>
+  </form>
+  <p class="muted small-note">Forgotten the password as well?
+    <a href="{{ url_for('forgot_password') }}">Send yourself a reset link</a>.</p>
+</section>
+{% endblock %}

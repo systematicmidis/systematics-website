@@ -12,6 +12,16 @@
   <div class="flash error">Pages need the newest database migration. Run
     <code>npm run db:remote</code> and reload.</div>
 {% else %}
+  {% if categories %}
+    <nav class="filter-chips" aria-label="Page categories">
+      <a class="chip{% if not category %} is-active{% endif %}" href="{{ url_for('pages') }}">Everything</a>
+      {% for item in categories %}
+        <a class="chip{% if category == item %} is-active{% endif %}"
+           href="{{ url_for('pages', category=item) }}">{{ item }}</a>
+      {% endfor %}
+    </nav>
+  {% endif %}
+
   {% if current_user %}
     <section class="settings-card">
       <h2>Create a page</h2>
@@ -33,6 +43,14 @@
         <label>About
           <textarea name="about" rows="4" maxlength="{{ max_about }}"></textarea>
         </label>
+        {% if can_extras %}
+          <label>Category
+            <select name="category">
+              <option value="">No category</option>
+              {% for item in categories %}<option value="{{ item }}">{{ item }}</option>{% endfor %}
+            </select>
+          </label>
+        {% endif %}
         <div class="editor-row">
           <label>Avatar
             <input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp">
@@ -70,7 +88,8 @@
       <div class="account-main">
         <strong><a href="{{ url_for('page_detail', slug=item.slug) }}">{{ item.name }}</a></strong>
         <small>/pages/{{ item.slug }} · {{ item.post_count }} post{% if item.post_count != 1 %}s{% endif %}
-          · managed by @{{ item.owner_username }}</small>
+          · managed by @{{ item.owner_username }}
+          {%- if item.category %} · {{ item.category }}{% endif %}</small>
         {% if item.tagline %}<p class="muted">{{ item.tagline }}</p>{% endif %}
       </div>
       <div class="actions"><a href="{{ url_for('page_detail', slug=item.slug) }}">Open</a></div>

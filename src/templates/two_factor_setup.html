@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Set up two-step verification · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="auth-card wide-card">
+  <h1>Set up two-step verification</h1>
+  <p class="muted">After your password, the site will ask for a code from an
+    authenticator app (Google Authenticator, Authy, 1Password, Bitwarden - any of
+    them). It takes about a minute and makes a stolen password much less useful.</p>
+
+  <div class="setup-steps">
+    <div class="setup-step">
+      <span class="setup-number">1</span>
+      <div>
+        <strong>Add the account in your app</strong>
+        <p class="muted">Choose "Set up account" / "Enter a setup key" and type this
+          secret. Time-based, six digits, 30 seconds - the defaults.</p>
+        <code class="totp-secret">{{ secret }}</code>
+        <p class="muted small-note">Typing a secret is the same thing a QR code
+          carries. The site does not send it anywhere, and no image service sees it.</p>
+        <details class="setup-uri">
+          <summary>Advanced: open the setup link</summary>
+          <p class="muted">An authenticator app on this device can open this
+            <code>otpauth://</code> link directly:</p>
+          <textarea readonly rows="3" onclick="this.select()">{{ uri }}</textarea>
+        </details>
+      </div>
+    </div>
+    <div class="setup-step">
+      <span class="setup-number">2</span>
+      <div>
+        <strong>Enter the code it shows</strong>
+        <p class="muted">The code changes every 30 seconds. If the first one is
+          refused, wait for the next and try again.</p>
+        <form method="post" class="inline-form">
+          <input name="code" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="6" required placeholder="123456" autofocus>
+          <button type="submit">Turn on two-step verification</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <p class="auth-bottom"><a href="{{ url_for('account_settings') }}">Cancel and go back</a></p>
+</div>
+{% endblock %}

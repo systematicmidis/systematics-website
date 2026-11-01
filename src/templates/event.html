@@ -2,11 +2,25 @@
 {% from "_widgets.html" import post_card, small_avatar with context %}
 {% block title %}{{ event.title }} · Systematics Black Midi site{% endblock %}
 {% block content %}
+{% if event.cover %}
+  <img class="profile-banner event-cover" src="{{ url_for('uploads', filename=event.cover) }}" alt="">
+{% endif %}
 <div class="event-header">
   <p class="eyebrow">EVENT</p>
   <h1>{{ event.title }}</h1>
   <p class="event-when">{{ event.starts_at }}{% if event.location %} · {{ event.location }}{% endif %}</p>
-  <p class="muted">By <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a></p>
+  <p class="muted">By <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a>
+    {%- if community %} · in <a href="{{ url_for('community', slug=community.slug) }}">c/{{ community.slug }}</a>{% endif %}
+    {%- if invited %} · <span class="badge badge-circle">You were invited</span>{% endif %}</p>
+  <div class="event-links">
+    {# The calendar file is what G+ events offered: the time lands on the
+       reader's own calendar rather than only in this page. #}
+    <a class="button small secondary" href="{{ url_for('event_calendar_file', event_id=event.id) }}">
+      Add to calendar (.ics)</a>
+    {% if is_owner %}
+      <a class="button small secondary" href="{{ url_for('event', event_id=event.id) }}#invite">Invite people</a>
+    {% endif %}
+  </div>
 </div>
 
 {% if event.description %}<div class="about-card"><p>{{ event.description|linkify }}</p></div>{% endif %}
@@ -43,6 +57,27 @@
     {% else %}
       <p class="muted">Nobody has replied yet.</p>
     {% endfor %}
+
+    {% if is_owner %}
+      <div class="section-label" id="invite">Invited</div>
+      {# Inviting somebody rings their bell and puts them on this list; the event
+         itself is public, so an invitation is a nudge rather than an access pass. #}
+      <form class="inline-form" method="post" action="{{ url_for('invite_event', event_id=event.id) }}">
+        <input name="username" placeholder="@handle" maxlength="24" required>
+        <button type="submit">Invite</button>
+      </form>
+      {% for person in invites %}
+        <a class="member-row" href="{{ url_for('profile', username=person.username) }}">
+          {{ small_avatar(person.profile_picture, person.display_name) }}
+          <span>{{ person.display_name }}</span>
+        </a>
+      {% else %}
+        <p class="muted">Nobody invited yet.</p>
+      {% endfor %}
+    {% elif invites %}
+      <div class="section-label">Invited</div>
+      <p class="muted">{{ invites|length }} people were invited.</p>
+    {% endif %}
   </aside>
 </div>
 {% endblock %}

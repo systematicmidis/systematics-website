@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import small_avatar with context %}
+{% block title %}Followers of {{ page.name }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow">PAGE</p>
+  <h1>Followers of {{ page.name }}</h1>
+  <p class="muted"><a href="{{ url_for('page_detail', slug=page.slug) }}">Back to the page</a>
+    · {{ people|length }} follower{% if people|length != 1 %}s{% endif %}</p>
+</div>
+<section class="people-card">
+  {% for person in people %}
+    <div class="person-row">
+      <a class="member-identity" href="{{ url_for('profile', username=person.username) }}">
+        {{ small_avatar(person.profile_picture, person.display_name) }}
+        <span>{{ person.display_name }}</span>
+      </a>
+      <div class="person-main">
+        {% if person.deleted_at %}
+          <span class="muted">This account was deleted.</span>
+        {% else %}
+          <a href="{{ url_for('profile', username=person.username) }}">@{{ person.username }}</a>
+          {% if person.bio %}<p class="person-meta">{{ person.bio|truncate(120) }}</p>{% endif %}
+        {% endif %}
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">Nobody follows this page yet. Posts from it are the way people
+      find it - a page can share them to a circle or its own stream.</p>
+  {% endfor %}
+</section>
+{% endblock %}

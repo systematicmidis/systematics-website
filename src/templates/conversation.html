@@ -33,7 +33,17 @@
   </a>
   {# Only the phone layout needs this: there the list and the pane are one at a
      time, so the way back to the list has to be on the conversation itself. #}
-  <a class="convo-back" href="{{ url_for('messages') }}">← All messages</a>
+  <div class="convo-tools">
+    {% if conversation and can_post %}
+      {# Hangouts began as voice and video; a call from here opens a room with just
+         the two of you and posts the link into the thread. #}
+      <form method="post" action="{{ url_for('call_conversation', conversation_id=conversation.id) }}">
+        <button class="button small" type="submit" title="Start a voice and video call">
+          ▶ Start a call</button>
+      </form>
+    {% endif %}
+    <a class="convo-back" href="{{ url_for('messages') }}">← All messages</a>
+  </div>
 </header>
 
 {% if standing_in %}
@@ -60,6 +70,16 @@
            a friend. #}
         {% if item.subject %}<p class="bubble-subject">{{ item.subject }}</p>{% endif %}
         <div class="bubble-body">{{ item.body|linkify }}</div>
+
+        {% if item.attachment %}
+          {# A picture sent in a Hangout is part of the bubble, and the lightbox
+             opens the stored file at full size. #}
+          <a class="bubble-image" href="{{ url_for('uploads', filename=item.attachment) }}"
+             data-lightbox="conversation-{{ conversation.id if conversation else 'new' }}">
+            <img src="{{ url_for('uploads', filename=item.attachment) }}"
+                 alt="Shared image" loading="lazy">
+          </a>
+        {% endif %}
 
         {% if item.about_id %}
           {# The post or comment a notice is about, as it was when the notice was
@@ -109,10 +129,14 @@
 </ol>
 
 {% if can_post %}
-  <form class="convo-compose" method="post" action="{{ request.path }}">
-    <textarea name="body" rows="2" maxlength="{{ MAX_DM_LENGTH }}" required
+  <form class="convo-compose" method="post" action="{{ request.path }}"
+        enctype="multipart/form-data">
+    <textarea name="body" rows="2" maxlength="{{ MAX_DM_LENGTH }}"
               placeholder="Message {{ other.display_name }}…"
               aria-label="Message {{ other.display_name }}"></textarea>
+    <label class="compose-attach" title="Attach a picture">
+      <input type="file" name="image" accept="image/png,image/jpeg,image/gif,image/webp">
+    </label>
     <button type="submit">Send</button>
   </form>
 {% else %}
