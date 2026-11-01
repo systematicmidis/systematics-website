@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}Systematics Black Midi site{% endblock %}</title>
+  <title>{% block title %}Systematics Black MIDI{% endblock %}</title>
   {# Theme, before anything is painted. Reading localStorage here (rather than in
      the deferred script at the end of the body) is what stops a dark-mode visitor
      seeing a white flash on every navigation. A first-time visitor follows their
@@ -30,10 +30,12 @@
      is unchanged if this request fails. #}
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&amp;display=swap">
-  {# The Google+ app icon, taken from the archived site's own favicon, so the
-     tab and a phone's home screen both carry the same mark as the top bar. #}
-  <link rel="icon" type="image/png" href="/static/gplus/icon.png">
-  <link rel="apple-touch-icon" href="/static/gplus/icon.png">
+  {# The site's own icon (the yellow cube), so the tab and a phone's home screen
+     both carry the same mark as the top bar. The .ico is the source file; the
+     PNG is its largest frame, used where a PNG is wanted. #}
+  <link rel="icon" type="image/x-icon" href="/static/brand/icon.ico">
+  <link rel="icon" type="image/png" href="/static/brand/icon.png">
+  <link rel="apple-touch-icon" href="/static/brand/icon.png">
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/theme.js" defer></script>
   {# Deferred like theme.js above: it only rewrites the update-log timestamps
@@ -59,11 +61,11 @@
    of either. Signed out, the right side is the same "Sign in" pair the real site
    showed to a visitor. #}
 <header class="topbar">
-  {# The 88x24 Google+ lockup from its own top bar, copied out of the archived
-     page (the 2x file it served, so it stays sharp). The site's name is in the
-     page title, the rail note and the footer instead of in the logo's place. #}
+  {# The site's own mark and name, where a lockup sat in the reference: the cube
+     icon at 28px, then the wordmark. #}
   <a class="topbar-brand" href="{{ url_for('home') }}" aria-label="Systematics Black MIDI home">
-    <img class="gp-lockup" src="/static/gplus/logo.png" alt="Google+" width="88" height="24">
+    <img class="brand-mark" src="/static/brand/icon.png" alt="" width="28" height="28">
+    <span class="brand-wordmark">Systematics Black MIDI</span>
   </a>
   <form class="topbar-search" action="{{ url_for('search') }}" method="get" role="search">
     <span class="topbar-search-icon" aria-hidden="true">
@@ -74,7 +76,7 @@
   </form>
   <div class="topbar-actions">
     {% if current_user %}
-      <a class="topbar-icon" href="{{ url_for('messages') }}" title="Messages" aria-label="Messages">
+      <a class="topbar-icon" href="{{ url_for('messages') }}" title="Hangouts" aria-label="Hangouts">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
         {% if unread_messages %}<span class="topbar-badge">{{ unread_messages }}</span>{% endif %}
       </a>
@@ -156,7 +158,7 @@
       {% else %}
         {# What a signed-out Google+ showed at the top of its nav instead of a
            settings row. #}
-        <a class="rail-link rail-join" href="{{ url_for('register') }}"><span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M23 11h-2V9h-2v2h-2v2h2v2h2v-2h2zM8 11v2.4h3.97c-.16 1.03-1.2 3.02-3.97 3.02-2.39 0-4.34-1.98-4.34-4.42S5.61 7.58 8 7.58c1.36 0 2.27.58 2.79 1.08l1.9-1.83C11.47 5.69 9.89 5 8 5c-3.87 0-7 3.13-7 7s3.13 7 7 7c4.04 0 6.72-2.84 6.72-6.84 0-.46-.05-.81-.11-1.16H8z"/></svg></span>Join Google+</a>
+        <a class="rail-link rail-join" href="{{ url_for('register') }}"><span class="rail-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M23 11h-2V9h-2v2h-2v2h2v2h2v-2h2zM8 11v2.4h3.97c-.16 1.03-1.2 3.02-3.97 3.02-2.39 0-4.34-1.98-4.34-4.42S5.61 7.58 8 7.58c1.36 0 2.27.58 2.79 1.08l1.9-1.83C11.47 5.69 9.89 5 8 5c-3.87 0-7 3.13-7 7s3.13 7 7 7c4.04 0 6.72-2.84 6.72-6.84 0-.46-.05-.81-.11-1.16H8z"/></svg></span>Join Systematics</a>
       {% endif %}
       {% if is_owner %}
         <a class="rail-link rail-link-owner" href="{{ url_for('settings') }}#owner"><span class="rail-icon" aria-hidden="true">◆</span>Owner tools</a>
@@ -182,7 +184,7 @@
         <a class="rail-link" href="{{ url_for('logout') }}"><span class="rail-icon" aria-hidden="true">⏻</span>Sign out</a>
       {% endif %}
       <div class="rail-note">
-        <strong>Systematics Black Midi site</strong>
+        <strong>Systematics Black MIDI</strong>
         <p>Projects, huge MIDI experiments, upcoming videos and progress updates.</p>
       </div>
     </div>
@@ -213,7 +215,7 @@
     {% endwith %}
     {% block content %}{% endblock %}
     </main>
-    <footer>Systematics Black Midi site · A personal project feed</footer>
+    <footer>Systematics Black MIDI · A personal project feed</footer>
   </div>
 </div>
 </body>

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_widgets.html" import post_card, small_avatar with context %}
-{% block title %}{{ event.title }} · Systematics Black Midi site{% endblock %}
+{% block title %}{{ event.title }} · Systematics Black MIDI{% endblock %}
 {% block content %}
 {% if event.cover %}
   <img class="profile-banner event-cover" src="{{ url_for('uploads', filename=event.cover) }}" alt="">

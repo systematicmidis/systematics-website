@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_widgets.html" import post_card with context %}
-{% block title %}{{ album.name }} · {{ owner.display_name }} · Systematics Black Midi site{% endblock %}
+{% block title %}{{ album.name }} · {{ owner.display_name }} · Systematics Black MIDI{% endblock %}
 {% block content %}
 <div class="feed-header">
   <p class="eyebrow"><a href="{{ url_for('photos', username=owner.username) }}">{{ owner.display_name }}'s photos</a></p>

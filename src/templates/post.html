@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_widgets.html" import avatar, category_badge, link_card, small_avatar, vote_bar with context %}
-{% block title %}{{ post.title }} · Systematics Black Midi site{% endblock %}
+{% block title %}{{ post.title }} · Systematics Black MIDI{% endblock %}
 
 {% macro comment_block(comment, viewer) %}
 <div class="comment" id="comment-{{ comment.id }}">
@@ -117,7 +117,7 @@
     {% else %}
       <div class="avatar site-avatar">BM</div>
       <div class="post-author">
-        <strong>Systematics Black Midi site</strong>
+        <strong>Systematics Black MIDI</strong>
         <span class="post-sub"><span class="post-audience">Public</span> · {{ category_badge(post) }}</span>
       </div>
     {% endif %}
@@ -136,7 +136,7 @@
   {% if share_target %}
     {# A share is a post about another post; the original is quoted, not copied. #}
     <a class="quoted-post" href="{{ post_url(share_target) }}">
-      <span class="quoted-by">{{ share_target.author_display_name or 'Systematics Black Midi site' }} wrote</span>
+      <span class="quoted-by">{{ share_target.author_display_name or 'Systematics Black MIDI' }} wrote</span>
       <strong>{{ share_target.title }}</strong>
       <span class="quoted-body">{{ share_target.content|striptags|truncate(220) }}</span>
     </a>

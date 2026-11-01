@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_widgets.html" import avatar, follow_button, person_row with context %}
 {% set is_followers = direction == 'followers' %}
-{% block title %}{{ 'Followers' if is_followers else 'Following' }} of {{ user.display_name }} · Systematics Black Midi site{% endblock %}
+{% block title %}{{ 'Followers' if is_followers else 'Following' }} of {{ user.display_name }} · Systematics Black MIDI{% endblock %}
 {% block content %}
 {# The list behind a profile's follower counts: Google+ showed the same thing when
    you clicked the number under somebody's name. #}

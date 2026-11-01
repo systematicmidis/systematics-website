@@ -1214,7 +1214,7 @@ html[data-theme="dark"] .rail-note strong { color:#cfd6e2; }
 html[data-theme="dark"] .feed-header { background:#191c22; border-color:#2c313c; }
 html[data-theme="dark"] .feed-header p { color:#97a0b1; }
 html[data-theme="dark"] .post-card { border-color:#2c313c; }
-html[data-theme="dark"] .gp-lockup { filter:invert(1) brightness(1.55); }
+html[data-theme="dark"] .brand-wordmark { color:var(--text); }
 html[data-theme="dark"] .avatar,
 html[data-theme="dark"] .small-avatar,
 html[data-theme="dark"] .site-avatar { background:#39404e; color:#fff; }
@@ -1915,8 +1915,9 @@ blockquote { margin:8px 0; padding:8px 12px; border-left:3px solid var(--line); 
   padding:0 8px; color:#212121; font-size:20px; letter-spacing:-.2px;
 }
 .topbar-brand:hover { text-decoration:none; }
-/* The real 88x24 lockup, served from its own 2x file so it stays crisp. */
-.gp-lockup { display:block; width:88px; height:24px; max-width:none; }
+/* The site's own mark and wordmark, where a lockup sat in the reference. */
+.brand-mark { display:block; width:28px; height:28px; border-radius:3px; max-width:none; }
+.brand-wordmark { color:#212121; font-size:17px; font-weight:500; white-space:nowrap; }
 .topbar-search { position:relative; flex:0 1 480px; min-width:0; margin:0; }
 .topbar-search input {
   width:100%; height:36px; margin:0; padding:0 12px 0 44px;
@@ -1977,7 +1978,8 @@ blockquote { margin:8px 0; padding:8px 12px; border-left:3px solid var(--line); 
 @media (max-width: 850px) {
   .topbar { height:56px; padding:0 8px; gap:8px; }
   .topbar-brand { padding:0 4px; }
-  .gp-lockup { width:74px; height:20px; }
+  .brand-mark { width:26px; height:26px; }
+  .brand-wordmark { display:none; }
   .topbar-search { flex:1 1 auto; }
   .topbar-search input { height:34px; }
   .topbar-search-icon { top:7px; }

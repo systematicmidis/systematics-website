@@ -191,18 +191,19 @@ account's own newest posts and comments (built by `moderatable_content()`, two q
 whole page rather than one per account); picking one attaches it to the ban, and the panel then
 shows it on the account row as *"Because of their comment on …"* and keeps it in the **Moderation
 history** at the foot of the page. The reason and the attached post or comment are also sent to
-the banned person - see **Messages** below.
+the banned person - see **Hangouts** below.
 
 Bans are migration `0009_account_deletion_and_bans.sql`, which adds columns to `users`, and the
 inbox they write into is migration `0014_messages.sql` (and the conversations it is made of,
 `0015_direct_messages.sql`) - so run `npm run db:remote` **before** the
 deploy that carries this code, since the GitHub Action ships code and never migrations.
 
-## Messages
+## Hangouts (messaging)
 
-Messaging is a Hangouts-shaped screen rather than a page of links. `/messages` is two panes: the
-people you have spoken to down the left - one row per conversation, newest first, with whoever
-spoke last and what they said - and the conversation itself on the right of them. Choosing a row
+Messaging is called **Hangouts** in the UI and lives at `/messages`. It is a two-pane screen rather
+than a page of links: the people you have spoken to down the left - one row per conversation,
+newest first, with whoever spoke last and what they said - and the conversation itself on the right
+of them. Choosing a row
 opens that thread beside it, and `/messages/c/<id>` is that same screen with the thread already
 chosen, so a shared link and a click in the list are one view. In the thread your own lines are
 tinted and pushed right, theirs flat on the left, and `Seen` marks a message the other person has
@@ -511,17 +512,18 @@ step down at 560px rather than forcing a sideways scroll.
 
 The shell is Google+ 2016's chrome, measured off its archived pages rather than eyeballed:
 
-- **A 64px white top bar**, 8px side padding, with the real 88x24 Google+ lockup at the left, the
-  site search, then messages, the notification bell and the reader's avatar at the right. Its only
-  edge is a `0 1px 8px rgba(0,0,0,.3)` shadow - the reference has no border rule.
+- **A 64px white top bar**, 8px side padding, with the site's own cube mark and **Systematics Black
+  MIDI** wordmark at the left, the site search, then Hangouts, the notification bell and the
+  reader's avatar at the right. Its only edge is a `0 1px 8px rgba(0,0,0,.3)` shadow - the
+  reference has no border rule.
 - **A 210px nav rail** under the bar carrying Google+'s own destinations in its order (Home,
   Collections, Communities, Hangouts, Events, Pages, Sparks, People, What's hot) with the Material
   glyphs from its markup, in 48px rows inset 20px. Site-only destinations follow the divider.
 - **One 568px stream** centred in the space that is left, with each post as a `#fefefe`, 2px-radius
   sheet on the `#eeeeee` field. A profile is the exception: its cover runs 1000px wide with the
   stream under it held to 568px, which is what Google+ did with a profile page.
-- **Google+'s action row** at the foot of every card: its own +1, comment and share paths, counts
-  beside them, and a +1 of your own in Google red (`#db4437`).
+- **The action row** at the foot of every card: the reference's +1, comment and share paths, counts
+  beside them, and a +1 of your own in its red (`#db4437`).
 
 `base.html` renders the bar, `.app` (a 210px + 1fr grid), `.rail` and `.stream-col`. `is-active`
 is worked out per link from `request.path` and the query string rather than hard-coded, so the rail
@@ -535,13 +537,13 @@ scrolling strip described in **Mobile layout**. Because the rail is inside
 `body { overflow-x:hidden }`, every new rule that scrolls sideways has to do it on an element
 inside the rail rather than on the page.
 
-**The two image files in `public/static/gplus/` are Google+'s own.** `logo.png` is the 2x lockup
-from its top bar (`lockup_gplus_dark_color_88x24dp.png`, served at 88x24) and `icon.png` is the app
-icon its pages used as the favicon (`gplus_icon_flush_76dp.png`, also the `apple-touch-icon`). Both
-were copied out of the archived page, so they carry Google's trademarks and belong to Google; they
-are here because this is a personal fan revival. Swap them for your own marks before this site
-stands for anything else. The top bar inverts the lockup in the dark theme rather than shipping a
-second file.
+**The brand images in `public/static/brand/` are the site's own.** `icon.ico` is the supplied
+source file (six frames, 16-128px) and `icon.png` is its 128px frame: the top-bar mark, the
+favicon and the `apple-touch-icon`. The wordmark beside it is text, not an image, so it stays
+crisp and reads to a screen reader; it is hidden under 850px, where the bar has no room for it.
+The reference's own logo and app icon were removed with this change, so nothing in the page is
+Google's trademark any more. The logo in the design-token notes below is only described, never
+shipped.
 
 **Page changes fade and rise.** Each child of `.feed` runs one `stream-in` animation on load
 (opacity 0 to 1, 8px up, 300ms on `cubic-bezier(0,0,0.2,1)`), with the first four items staggered

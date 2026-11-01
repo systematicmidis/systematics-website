@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_widgets.html" import post_card with context %}
-{% block title %}{% if feed == 'following' %}Following · {% elif feed == 'incoming' %}Incoming · {% elif active_circle %}{{ active_circle.name }} · {% elif category %}{{ category_labels[category] }} · {% endif %}Systematics Black Midi site{% endblock %}
+{% block title %}{% if feed == 'following' %}Following · {% elif feed == 'incoming' %}Incoming · {% elif active_circle %}{{ active_circle.name }} · {% elif category %}{{ category_labels[category] }} · {% endif %}Systematics Black MIDI{% endblock %}
 {% block content %}
 <div class="feed-header">
   <h1>
@@ -9,7 +9,7 @@
     {%- elif active_circle %}◎ {{ active_circle.name }}
     {%- elif category == 'systematics' %}Systematics posts
     {%- elif category == 'community' %}Community posts
-    {%- else %}Systematics Black Midi site{% endif -%}
+    {%- else %}Systematics Black MIDI{% endif -%}
   </h1>
   <p>
     {% if feed == 'following' %}Posts from the people you follow, plus your own.

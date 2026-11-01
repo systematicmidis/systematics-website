@@ -148,7 +148,7 @@
     {% else %}
       <div class="avatar site-avatar">BM</div>
       <div class="post-author">
-        <strong>Systematics Black Midi site</strong>
+        <strong>Systematics Black MIDI</strong>
         <span class="post-sub"><span class="post-audience">Public</span> · {{ category_badge(post) }}</span>
       </div>
     {% endif %}
@@ -165,7 +165,7 @@
       {% if post.content %}<p class="share-note">{{ post.content|linkify(500, created_at=post.created_at) }}</p>{% endif %}
       {% if post.shared_title %}
         <a class="quoted-post" href="{{ url_for('post', public_id=post.shared_public_id) }}">
-          <span class="quoted-by">{{ post.shared_author_name or 'Systematics Black Midi site' }} shared</span>
+          <span class="quoted-by">{{ post.shared_author_name or 'Systematics Black MIDI' }} shared</span>
           <strong>{{ post.shared_title }}</strong>
           <span class="quoted-body">{{ post.shared_content|striptags|truncate(180) }}</span>
         </a>

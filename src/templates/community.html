@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_widgets.html" import post_card, small_avatar with context %}
-{% block title %}c/{{ community.slug }} · Systematics Black Midi site{% endblock %}
+{% block title %}c/{{ community.slug }} · Systematics Black MIDI{% endblock %}
 {% block content %}
 {% if community.banner %}
   <img class="profile-banner community-banner" src="{{ url_for('uploads', filename=community.banner) }}" alt="">
