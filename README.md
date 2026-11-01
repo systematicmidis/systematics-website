@@ -545,6 +545,16 @@ The reference's own logo and app icon were removed with this change, so nothing 
 Google's trademark any more. The logo in the design-token notes below is only described, never
 shipped.
 
+**A post's own page is Google+'s reading card**, not the stream's flat sheet: one 530px white
+card with no radius and a `0 1px 4px` shadow, centred on the `#f1f1f1` field. The header is a
+single line - name, then the audience, with the date at the card's right edge - the actions are
+icon-only buttons aligned right in the reference's order (comment, +1, share), and comments are
+plain rows inset 12px with a 36px avatar, a `+N` in the secondary ink and the date far right: no
+boxes and no button chrome. That is the `body.page-post` block at the foot of `style.css`; it is
+scoped to the permalink so the stream keeps its flat cards. The site's own extras (Embed, Mute,
+Report, edit history, the share box) sit under Google+'s "Shared publicly · View activity" line
+as 12px secondary text rather than as a second toolbar.
+
 **Page changes fade and rise.** Each child of `.feed` runs one `stream-in` animation on load
 (opacity 0 to 1, 8px up, 300ms on `cubic-bezier(0,0,0.2,1)`), with the first four items staggered
 36ms apart, so a navigation reads as the stream swapping in place instead of the window blinking.

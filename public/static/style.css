@@ -2009,3 +2009,108 @@ html[data-theme="dark"] .tab:hover { background:#21252e; }
 html[data-theme="dark"] .composer-card { background:var(--card); border-color:var(--line); }
 html[data-theme="dark"] .composer-prompt { background:#21252e; color:var(--text-soft); }
 html[data-theme="dark"] .composer-prompt:hover { background:#262b36; color:var(--text); }
+
+/* A post's own page --------------------------------------------------------
+   Google+'s permalink is one 530px white sheet - no radius, `0 1px 4px` shadow -
+   centred on the #f1f1f1 field. Its header is a single line (name, then the
+   audience) with the date at the card's right edge, its actions are icon-only
+   buttons aligned to the right, and its comments are plain rows: avatar, name,
+   a "+N" in the secondary ink, the date far right, and no boxes or button
+   chrome anywhere. These rules only apply to the permalink, so the stream and
+   the profile keep the flat-card shape they already had. */
+body.page-post { background:#f1f1f1; }
+.post-card.full-post {
+  width:min(530px, 100%);
+  margin:0 auto 32px;
+  background:#fff;
+  box-shadow:0 1px 4px rgba(0,0,0,.14);
+  border-radius:0;
+}
+.full-post .post-head { padding:16px; gap:8px; }
+.full-post .post-author.post-line {
+  flex-direction:row; align-items:baseline; gap:8px;
+  line-height:18px; min-width:0;
+}
+.full-post .post-author strong { font-size:14px; line-height:18px; }
+.full-post .post-author .post-audience { font-size:14px; line-height:18px; margin:0; }
+.full-post .post-head .post-stamp { font-size:12px; color:rgba(0,0,0,0.54); }
+.full-post .post-head .more { font-size:12px; }
+.full-post .post-body { padding:0 16px 12px; }
+.full-post .post-body h1.post-title { margin:0 0 8px; font-size:14px; line-height:20px; font-weight:500; }
+.full-post .comment-main { flex:1 1 auto; }
+.full-post .post-content, .full-post .post-body p { font-size:14px; line-height:20px; }
+/* The action cluster: three 36px icon buttons at the right edge, counts beside
+   the glyphs, no words. The site's downvote has no counterpart in the
+   reference, so it is not shown here. */
+.full-post .vote-bar { border-top:0; margin:16px 8px 0; justify-content:flex-end; gap:12px; }
+.full-post .vote-form { flex:0 0 auto; }
+/* The reference's order is comment, +1, share - the plus-one sits in the
+   middle, not first as it does in the stream. */
+.full-post .comment-link { order:1; }
+.full-post .vote-form { order:2; }
+.full-post .share-action { order:3; }
+.full-post .post-action {
+  flex:0 0 auto; width:auto; min-width:36px; height:36px;
+  padding:0 5px; gap:3px; font-size:13px;
+}
+.full-post .post-action svg { width:22px; height:22px; }
+.full-post .post-action .action-label { display:none; }
+.full-post .post-action.down { display:none; }
+.full-post .shared-line {
+  margin:0; padding:0 16px 4px; font-size:13px; color:rgba(0,0,0,0.54);
+}
+.full-post .shared-line a { color:#4285f4; }
+/* The site's extra controls (Embed, Mute, Report, edit history) live under the
+   shared line as small text, the way a secondary action would in G+. */
+.full-post .post-actions {
+  border:0; padding:0 16px 10px; gap:14px; font-size:12px;
+  color:rgba(0,0,0,0.54);
+}
+.full-post .post-actions .link-button,
+.full-post .post-actions summary { color:rgba(0,0,0,0.54); font-size:12px; font-weight:400; }
+/* Comments: rows, not cards. */
+.full-post .comments { padding:0; }
+.full-post .comment { padding:12px 16px; border-top:0; gap:12px; }
+.full-post .comment .small-avatar { width:36px; height:36px; }
+.full-post .comment-meta { display:flex; align-items:baseline; }
+.full-post .comment-meta strong { font-size:14px; line-height:20px; }
+.full-post .comment-meta .comment-plus {
+  margin-left:8px; color:rgba(0,0,0,0.54); font-size:12px; font-weight:500;
+}
+.full-post .comment-date {
+  margin-left:auto; color:rgba(0,0,0,0.54); font-size:12px; white-space:nowrap;
+}
+.full-post .comment-main p { margin:2px 0 0; font-size:14px; line-height:20px; }
+.full-post .comment-actions { margin-top:4px; gap:12px; }
+.full-post .comment-actions .vote {
+  padding:0; border:0; background:none;
+  color:rgba(0,0,0,0.54); font-size:12px;
+}
+.full-post .comment-actions summary,
+.full-post .comment-actions button,
+.full-post .comment-actions .link-button {
+  font-size:12px; color:rgba(0,0,0,0.54); font-weight:400;
+}
+.full-post .comment-replies { margin-left:48px; }
+/* The comment box reads as a field, not as a panel: borderless buttons, one
+   1px input. */
+.full-post .comment-form { padding:12px 16px 16px; gap:12px; }
+.full-post .comment-form textarea { min-height:44px; margin:0; }
+.full-post .comment-form .comment-inputs button {
+  padding:0; background:none; border:0; color:#4285f4; font-size:13px; font-weight:500;
+}
+.full-post .login-to-comment { margin:0 16px 16px; }
+html[data-theme="dark"] body.page-post { background:var(--bg); }
+html[data-theme="dark"] .post-card.full-post { background:var(--card); box-shadow:none; }
+html[data-theme="dark"] .full-post .post-action:hover,
+html[data-theme="dark"] .full-post .comment-actions button:hover { background:#21252e; }
+
+/* A reply or report form opened inside a comment's action row is a block, not
+   the 96px-wide inline box its parent control is: it has an avatar, a textarea
+   and a button, and Google+ put that composer under the comment rather than
+   beside it. */
+.comment-actions details { flex:1 1 100%; width:100%; }
+.comment-actions details .comment-form,
+.comment-actions details form { display:flex; width:100%; }
+.comment-actions details .comment-inputs { flex:1 1 auto; min-width:0; }
+.comment-actions details textarea { width:100%; }
