@@ -121,7 +121,7 @@ stops a dark-mode visitor seeing a white flash on every navigation, and
 picks a theme explicitly the site follows the operating system's own preference and keeps
 following it live. All the colours live in the `html[data-theme="dark"]` block at the foot of
 `public/static/style.css`; the rest of that file is untouched, so light mode cannot regress.
-The ☾ / ☀ button in the top bar is the same switch in one click.
+The ☾ / ☀ button in the rail (its right end on a phone) is the same switch in one click.
 
 **Account** is a signpost for signed-in people (display name, user ID, member since, links to
 profile settings, your profile, your followers, sign out) and a "create an account" prompt for
@@ -206,7 +206,7 @@ spoke last and what they said - and the conversation itself on the right of them
 opens that thread beside it, and `/messages/c/<id>` is that same screen with the thread already
 chosen, so a shared link and a click in the list are one view. In the thread your own lines are
 tinted and pushed right, theirs flat on the left, and `Seen` marks a message the other person has
-opened. The rail carries the unread count, an unread row is tinted and badged **N new**, and the
+opened. The envelope in the top bar carries the unread count, an unread row is tinted and badged **N new**, and the
 open thread is ruled on its left. **Mark all read** clears the lot.
 
 **Group Hangouts** share that list and that pane. **New group** in the list opens
@@ -494,10 +494,12 @@ are worth keeping in mind when editing `public/static/style.css`:
 - **User text needs `overflow-wrap:anywhere`** (set on post bodies, comments, bios and link
   cards), because a URL or a filename has no break opportunity for the browser to use.
 
-The home page tabs wrap onto a second row under 560px, and under 850px the rail leaves the side
-of the window for the top: the brand and the theme/sign-out buttons on one row, then every link
-as one strip that scrolls sideways. That strip is usually wider than the phone - it has its own
-scrollbar - so the page itself still measures exactly the width of the viewport.
+The home page tabs stay on one row and scroll sideways under 850px, the same as Google+'s tab
+strip, and so does a profile's. Under 850px the rail leaves the side of the window for the top:
+every link becomes one strip that scrolls sideways, with the theme/sign-out buttons at its right
+edge. That strip is usually wider than the phone - it has its own scrollbar, and `.rail-links`
+carries `min-width:0` so it can be - so the page itself still measures exactly the width of the
+viewport.
 
 The messages screen is two panes on a desktop and one at a time on a phone: under 850px the list
 is what you get while nothing is open, and once something is, the conversation takes the screen and
@@ -507,18 +509,39 @@ step down at 560px rather than forcing a sideways scroll.
 
 ## Shape of the page
 
-The shell copies Google+: every link lives in a rail against the left edge of the window, the
-stream is one narrow column centred in the space that is left over, and there is no top bar.
-`base.html` renders `.app` (a two-column grid), `.rail` and `.stream-col`. `is-active` is worked
-out per link from `request.path` and the query string rather than hard-coded, so the rail says
-where you actually are - which matters for the two category feeds and the following stream, whose
-URLs differ only in their query.
+The shell is Google+ 2016's chrome, measured off its archived pages rather than eyeballed:
 
-The rail is `position:sticky` and as tall as the window, so it holds still while the stream
-scrolls past it, and `margin-top:auto` keeps its note and the theme/sign-out buttons at the foot
-of the window on a short page. Under 850px it becomes the two-row strip described in **Mobile
-layout**. Because the rail is inside `body { overflow-x:hidden }`, every new rule that scrolls
-sideways has to do it on an element inside the rail rather than on the page.
+- **A 64px white top bar**, 8px side padding, with the real 88x24 Google+ lockup at the left, the
+  site search, then messages, the notification bell and the reader's avatar at the right. Its only
+  edge is a `0 1px 8px rgba(0,0,0,.3)` shadow - the reference has no border rule.
+- **A 210px nav rail** under the bar carrying Google+'s own destinations in its order (Home,
+  Collections, Communities, Hangouts, Events, Pages, Sparks, People, What's hot) with the Material
+  glyphs from its markup, in 48px rows inset 20px. Site-only destinations follow the divider.
+- **One 568px stream** centred in the space that is left, with each post as a `#fefefe`, 2px-radius
+  sheet on the `#eeeeee` field. A profile is the exception: its cover runs 1000px wide with the
+  stream under it held to 568px, which is what Google+ did with a profile page.
+- **Google+'s action row** at the foot of every card: its own +1, comment and share paths, counts
+  beside them, and a +1 of your own in Google red (`#db4437`).
+
+`base.html` renders the bar, `.app` (a 210px + 1fr grid), `.rail` and `.stream-col`. `is-active`
+is worked out per link from `request.path` and the query string rather than hard-coded, so the rail
+says where you actually are - which matters for the two category feeds and the following stream,
+whose URLs differ only in their query.
+
+The rail is `position:sticky`, starts at 64px and is as tall as the rest of the window, so it
+holds still while the stream scrolls past it, and `margin-top:auto` keeps its note and the
+theme/sign-out buttons at the foot of the window on a short page. Under 850px it becomes the
+scrolling strip described in **Mobile layout**. Because the rail is inside
+`body { overflow-x:hidden }`, every new rule that scrolls sideways has to do it on an element
+inside the rail rather than on the page.
+
+**The two image files in `public/static/gplus/` are Google+'s own.** `logo.png` is the 2x lockup
+from its top bar (`lockup_gplus_dark_color_88x24dp.png`, served at 88x24) and `icon.png` is the app
+icon its pages used as the favicon (`gplus_icon_flush_76dp.png`, also the `apple-touch-icon`). Both
+were copied out of the archived page, so they carry Google's trademarks and belong to Google; they
+are here because this is a personal fan revival. Swap them for your own marks before this site
+stands for anything else. The top bar inverts the lockup in the dark theme rather than shipping a
+second file.
 
 **Page changes fade and rise.** Each child of `.feed` runs one `stream-in` animation on load
 (opacity 0 to 1, 8px up, 300ms on `cubic-bezier(0,0,0.2,1)`), with the first four items staggered
@@ -556,7 +579,13 @@ What the stylesheet declares, and what this site therefore uses:
 | Divider | `#e0e0e0` | `border-top:1px solid #e0e0e0` on its cards |
 | Link / primary blue | `#4285f4` | 30 uses, e.g. `.HQ8yf a { color:#4285f4 }` |
 | Google red | `#db4437` | accents and destructive states |
-| Card | `#fff`, `border-radius:2px`, **no shadow** | 2px is its workhorse radius; elevation (`0 8px 10px 1px rgba(0,0,0,.14)` + two layers) was for menus and dialogs, not a card in a stream |
+| Card | `#fefefe`, `border-radius:2px`, **no border, no shadow** | the archived stream card reports `rgb(254,254,254)` and a 2px radius; elevation (`0 8px 10px 1px rgba(0,0,0,.14)` + two layers) was for menus and dialogs, not a card in a stream |
+| Page field | `#eeeeee` | the panel behind the stream in the archived profile page |
+| Top bar | `64px`, `padding:0 8px`, `box-shadow:0 1px 8px rgba(0,0,0,.3)` | measured on the archived `[role=banner]` |
+| Nav rail | `210px` wide, rows `48px` at `padding-left:20px`, 24px glyphs | measured on the archived nav panel and its links |
+| Stream avatar | `36px` | the `s36` images its stream serves |
+| Section title | `16px/500` in `rgba(0,0,0,.54)`, `margin-top:32px` | its `Google's posts` heading |
+| Comment text | `13px/20px` | one step under a post's 14px body |
 | Hover fills | `#f5f5f5`, `#fafafa` | `.cjGgHb .Vmcec:hover { background-color:#fafafa }` |
 | Spacing | 8px grid: `0 16px`, `16px`, `0 24px`, `8px` | its most frequent paddings |
 
@@ -658,7 +687,7 @@ content warning, hashtags with `/tag/<tag>` pages, `@mentions` that notify, and
 author can now delete comments on their own post, anyone can edit or delete their own comment
 (with a permalink to it), and long reply threads collapse.
 
-**Notifications** (`/notifications`) is the bell in the rail, with an unread badge: +1s on your
+**Notifications** (`/notifications`) is the bell in the top bar, with an unread badge: +1s on your
 posts and comments, comments and replies, mentions, follows, reshares and photo tags. A post
 can be muted so its notifications stop. **Find people** (`/people`) uses follows-of-follows,
 and `?feed=incoming` is Google+'s Incoming stream: people who follow you that you have not

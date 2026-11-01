@@ -64,7 +64,16 @@
 {% endif %}
 
 {% if current_user %}
-<div class="feed-cta"><a class="button" href="{{ url_for('new_post') }}">＋ Write a post</a></div>
+{# The share box Google+ put at the top of the stream. It is one link into the
+   composer, not a second form: everything a post needs lives in the editor. #}
+<div class="composer-card">
+  {% if current_user.profile_picture %}
+    <img class="avatar avatar-img" src="{{ url_for('uploads', filename=current_user.profile_picture) }}" alt="">
+  {% else %}
+    <span class="avatar" aria-hidden="true">{{ current_user.display_name|name_initial }}</span>
+  {% endif %}
+  <a class="composer-prompt" href="{{ url_for('new_post') }}">Share what's new…</a>
+</div>
 {% else %}
 <div class="feed-cta muted">
   <a href="{{ url_for('register') }}">Create an account</a> to post, comment and follow people.

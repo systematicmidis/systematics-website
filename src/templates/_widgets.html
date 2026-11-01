@@ -134,14 +134,14 @@
         {# A deleted account keeps its posts but has no profile left to open. A
            page post shows the page, not the person managing it. #}
         <strong>{% if post.page_name %}<a href="{{ url_for('page_detail', slug=post.page_slug) }}">{{ post.page_name }}</a><span class="page-as"> · Page</span>{% elif post.author_deleted %}{{ post.author_display_name }}{% else %}<a class="hover-name" href="{{ url_for('profile', username=post.author_username) }}" data-hovercard="{{ url_for('hovercard', username=post.author_username) }}">{{ post.author_display_name }}</a>{% endif %}</strong>
-        <span>
+        {# The audience and the category sit where Google+ put its "Public"
+           line: under the name, in the secondary ink. #}
+        <span class="post-sub">
+          <span class="post-audience">{{ 'Limited' if post.audience and post.audience != 'public' else 'Public' }}</span>
+          <span aria-hidden="true">·</span>
           {{ category_badge(post) }}
-          {%- if post.audience and post.audience != 'public' %}
-            <span class="badge badge-limited" title="Shared with a limited audience">🔒 Limited</span>
-          {%- endif %}
           {%- if post.pinned %} <span class="badge badge-pinned">Pinned</span>{% endif %}
           {%- if post.locked %} <span class="badge badge-locked">Locked</span>{% endif %}
-          · <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }}</a>
           {% if post.status != 'published' %} · {{ post.status }}{% endif %}
         </span>
       </div>
@@ -149,9 +149,11 @@
       <div class="avatar site-avatar">BM</div>
       <div class="post-author">
         <strong>Systematics Black Midi site</strong>
-        <span>{{ category_badge(post) }} · <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }}</a></span>
+        <span class="post-sub"><span class="post-audience">Public</span> · {{ category_badge(post) }}</span>
       </div>
     {% endif %}
+    {# G+ pushed the age to the card's right edge, away from the name block. #}
+    <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }}</a>
     {% if is_admin or (current_user and post.user_id and post.user_id == current_user.id) %}
       <a class="more" href="{{ url_for('edit_post', post_id=post.id) }}">Edit</a>
     {% endif %}
@@ -193,26 +195,40 @@
   </span>
 {%- endmacro %}
 
+{# The foot of a Google+ card, in its own three-button shape: +1 with the score,
+   Comment with the count, Share. Material glyphs rather than emoji, and the +1
+   turns Google blue when it is the reader's own. Dislike stays as the compact
+   second button the site already had; G+ itself had no downvote. #}
 {% macro vote_bar(post) -%}
 <div class="vote-bar">
-  <span class="score{% if post.score > 0 %} positive{% elif post.score < 0 %} negative{% endif %}"
-        title="Score">{{ post.score }}</span>
   {% if current_user %}
     <form class="vote-form" method="post" action="{{ url_for('vote_post', post_id=post.id) }}">
-      <button class="vote{% if post.my_vote == 1 %} active{% endif %}" name="value" value="1"
-              type="submit" title="Like">▲</button>
-      <button class="vote{% if post.my_vote == -1 %} active{% endif %}" name="value" value="-1"
-              type="submit" title="Dislike">▼</button>
+      <button class="post-action{% if post.my_vote == 1 %} active{% endif %}" name="value" value="1"
+              type="submit" title="+1 this post">
+        {# The +1, comment and share glyphs are the ones Google+'s own action row
+             served, path and viewBox copied from the archived markup. #}
+        <svg viewBox="2 0 22 22" aria-hidden="true"><path d="M10 8H8v4H4v2h4v4h2v-4h4v-2h-4zm4.5-1.92V7.9l2.5-.5V18h2V5z"/></svg>
+        <span>+1</span>
+        <span class="action-count{% if post.score > 0 %} positive{% elif post.score < 0 %} negative{% endif %}">{{ post.score }}</span>
+      </button>
+      <button class="post-action down{% if post.my_vote == -1 %} active{% endif %}" name="value" value="-1"
+              type="submit" title="Dislike this post">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>
+      </button>
     </form>
   {% else %}
-    <a class="vote signin" href="{{ url_for('login', next=post_url(post)) }}">Sign in to vote</a>
+    <a class="post-action signin" href="{{ url_for('login', next=post_url(post)) }}" title="+1 this post">
+      <svg viewBox="2 0 22 22" aria-hidden="true"><path d="M10 8H8v4H4v2h4v4h2v-4h4v-2h-4zm4.5-1.92V7.9l2.5-.5V18h2V5z"/></svg>
+      <span>+1</span><span class="action-count">{{ post.score }}</span>
+    </a>
   {% endif %}
-  <a class="comment-link" href="{{ post_url(post) }}#comments">💬
-    {{ post.comment_count }} comment{% if post.comment_count != 1 %}s{% endif %}</a>
-  {% if post.share_count %}
-    <a class="ripple-link" href="{{ url_for('ripples', post_id=post.id) }}"
-       title="Who shared this">↻ {{ post.share_count }}</a>
-  {% endif %}
-  <a class="ripple-link" href="{{ post_url(post) }}#share">Share</a>
+  <a class="post-action comment-link" href="{{ post_url(post) }}#comments">
+    <svg viewBox="1 0 22 22" aria-hidden="true"><path d="M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18zM18 14H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+    <span>Comment</span><span class="action-count">{{ post.comment_count }}</span>
+  </a>
+  <a class="post-action" href="{{ post_url(post) }}#share" title="Share this post">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
+    <span>Share</span>{% if post.share_count %}<span class="action-count">{{ post.share_count }}</span>{% endif %}
+  </a>
 </div>
 {%- endmacro %}

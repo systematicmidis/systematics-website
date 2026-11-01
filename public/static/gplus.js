@@ -210,10 +210,30 @@
     });
   }
 
+  /* A profile's tab strip only moves its underline here: every tab is an anchor
+     to a section that is already on the page, so with the script off the links
+     still jump to the right place. */
+  function initProfileTabs() {
+    var tabs = document.querySelectorAll('[data-ptab]');
+    if (!tabs.length) return;
+    function select(id) {
+      for (var i = 0; i < tabs.length; i++) {
+        tabs[i].classList.toggle('active', tabs[i].getAttribute('href') === '#' + id);
+      }
+    }
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].addEventListener('click', function () {
+        select(this.getAttribute('href').slice(1));
+      });
+    }
+    if (location.hash) select(location.hash.slice(1));
+  }
+
   function ready() {
     initInfiniteScroll();
     initLightbox();
     initHovercards();
+    initProfileTabs();
   }
 
   if (document.readyState === 'loading') {

@@ -1,6 +1,6 @@
 :root {
-  --bg: #f1f3f4;
-  --card: #fff;
+  --bg: #eeeeee;                /* Google+ 2016's page field, measured off the archive */
+  --card: #fefefe;             /* the archived stream card's own background */
   --text: #212121;              /* Google+ primary ink: rgba(0,0,0,.87) */
   --muted: rgba(0,0,0,0.54);    /* Google+ secondary ink */
   --line: #e0e0e0;              /* Google+ divider */
@@ -59,19 +59,25 @@ b, strong { font-weight:500; }
    breakpoint further down. */
 .app {
   display:grid;
-  grid-template-columns:212px minmax(0, 1fr);
-  min-height:100vh;
+  /* 210px of nav and a 568px stream: both are Google+'s own measurements (the
+     archived nav panel reports width:210px, top:64px), and they are what leave
+     the wide empty field on either side of the column. */
+  grid-template-columns:210px minmax(0, 1fr);
+  min-height:calc(100vh - 64px);
 }
 .rail {
   grid-column:1;
   align-self:start;
   position:sticky;
-  top:0;
-  height:100vh;
+  /* The top bar is sticky above it, so the rail starts where the bar ends. */
+  top:64px;
+  height:calc(100vh - 64px);
   overflow-y:auto;
   display:flex;
   flex-direction:column;
-  padding:10px 10px 20px 6px;
+  /* G+ started the first nav row 16px under the bar and ran the items to the
+     window's edge, so the highlight in an active row is full-bleed. */
+  padding:16px 0 20px;
 }
 .rail-brand {
   display:block;
@@ -93,21 +99,34 @@ b, strong { font-weight:500; }
 .rail-link {
   display:flex;
   align-items:center;
-  gap:9px;
+  gap:16px;
   width:100%;
-  padding:9px 12px;
+  /* 48px rows with a 20px inset and a 24px glyph: the measurements the archived
+     sidebar's own links report (height:48px; padding:0 12px 0 20px). */
+  height:48px;
+  padding:0 12px 0 20px;
   border:0;
-  border-radius:3px;
+  border-radius:0;
   background:none;
   color:rgba(0,0,0,0.87);
   font:inherit;
-  font-size:13px;
+  font-size:14px;
   text-align:left;
   cursor:pointer;
 }
 .rail-link:hover { background:var(--surface-3); text-decoration:none; }
-.rail-link.is-active { background:#eeeeee; color:rgba(0,0,0,0.87); font-weight:500; }
-.rail-icon { flex:0 0 16px; display:inline-block; text-align:center; }
+/* Google+ marked the current destination in its blue, on a blue tint, not the
+   grey fill this used to use. */
+.rail-link.is-active { background:#e8f0fe; color:#1a73e8; font-weight:500; }
+.rail-link.is-active .rail-icon { color:#1a73e8; }
+.rail-icon { flex:0 0 24px; display:flex; align-items:center; justify-content:center; }
+.rail-icon svg { width:24px; height:24px; fill:currentColor; opacity:.62; }
+.rail-link:hover .rail-icon svg { opacity:.87; }
+.rail-link.is-active .rail-icon svg { opacity:1; }
+.rail-link .owner-tag { margin-left:6px; }
+/* The signed-out "Join Google+" row sat in the nav in the site's blue. */
+.rail-join { color:#4285f4; font-weight:500; }
+.rail-join .rail-icon svg { opacity:1; }
 .rail-theme { margin-top:4px; }
 .rail-foot { margin-top:auto; padding-top:14px; }
 .rail-note {
@@ -124,7 +143,7 @@ b, strong { font-weight:500; }
 /* The column: one narrow stream, centred in the space the rail leaves over, with
    the footer pushed to the foot of the window on a short page. */
 .stream-col { grid-column:2; min-width:0; display:flex; flex-direction:column; }
-.feed { width:min(640px, 100%); margin:16px auto 0; min-width:0; }
+.feed { width:min(568px, 100%); margin:24px auto 0; min-width:0; }
 footer { margin-top:auto; }
 
 /* Page changes --------------------------------------------------------------
@@ -145,30 +164,30 @@ footer { margin-top:auto; }
   .feed > * { animation:none; }
 }
 
-.feed-header {
-  background:#fff;
-  border:1px solid #e0e0e0;
-  padding:20px 22px;
-  margin-bottom:12px;
-}
-.feed-header h1 { margin:0 0 4px; font-size:24px; font-weight:400; }
+/* A stream's heading on the page field rather than in a card: Google+ wrote its
+   section titles straight onto the background (16px/500 in rgba(0,0,0,.54),
+   margin-top 32px) and let the posts be the only white boxes. */
+.feed-header { padding:16px 0 10px; }
+.feed-header h1 { margin:0 0 2px; font-size:20px; font-weight:500; }
 .feed-header p { margin:0; color:rgba(0,0,0,0.54); }
 
 .post-card {
+  /* The archived card reports background rgb(254,254,254) and radius 2px with
+     no border at all; on the grey field it reads as a sheet on its own. */
   background:var(--card);
-  /* Flat, like Google+'s stream cards were: a hairline and no shadow. Its CSS
-     keeps elevation (0 1px 4px rgba(0,0,0,.14)) for raised surfaces - menus and
-     dialogs - not for a card sitting in a stream. */
-  border:1px solid #e0e0e0;
+  border:0;
   border-radius:2px;
-  margin-bottom:14px;
+  margin-bottom:8px;
 }
 .post-head {
-  padding:14px 16px 8px;
+  padding:16px 16px 0;
   display:flex;
   align-items:center;
-  gap:10px;
+  gap:12px;
 }
+/* 36px is the avatar size in the archived stream (the images it serves are
+   s36), not the 40 this file uses for standalone avatars. */
+.post-head .avatar { width:36px; height:36px; font-size:12px; }
 .avatar, .small-avatar {
   flex:0 0 auto;
   display:flex;
@@ -181,9 +200,14 @@ footer { margin-top:auto; }
 }
 .avatar { width:40px; height:40px; font-size:12px; }
 .small-avatar { width:32px; height:32px; font-size:12px; }
-.post-author { display:flex; flex-direction:column; line-height:18px; }
-.post-author strong { color:rgba(0,0,0,0.87); }
+.post-author { display:flex; flex-direction:column; line-height:18px; min-width:0; }
+.post-author strong { color:rgba(0,0,0,0.87); font-weight:500; }
 .post-author span { color:#9e9e9e; font-size:12px; }
+.post-sub { display:flex; align-items:center; flex-wrap:wrap; gap:4px; }
+/* Google+ wrote the audience at 14px/500 in rgba(0,0,0,.54), next to the name. */
+.post-audience { color:rgba(0,0,0,0.54); font-weight:500; font-size:12px; }
+.post-head .post-stamp { margin-left:auto; color:#9e9e9e; font-size:12px; white-space:nowrap; }
+.post-head > .more { margin-left:10px; }
 .more {
   margin-left:auto;
   border:0;
@@ -193,7 +217,7 @@ footer { margin-top:auto; }
   padding:0 5px;
   cursor:pointer;
 }
-.post-body { padding:5px 20px 18px; }
+.post-body { padding:8px 16px 16px; }
 .post-body h1, .post-body h2 {
   margin:6px 0 12px;
   font-weight:400;
@@ -203,15 +227,15 @@ footer { margin-top:auto; }
    rgba(0,0,0,.87) and never coloured a heading blue. It still underlines on
    hover through the global ``a:hover`` rule above. */
 .post-body h2 a { color:inherit; }
-.post-body h1 { font-size:28px; }
-.post-body h2 { font-size:21px; }
+.post-body h1 { font-size:24px; }
+.post-body h2 { font-size:20px; }
 .post-body p, .post-content {
   margin:0;
   line-height:20px;
   white-space:pre-wrap;
   color:rgba(0,0,0,0.87);
+  font-size:14px;
 }
-.post-content { font-size:15px; }
 .post-link { display:inline-block; margin-top:8px; }
 
 /* The commit log a post's [COMMITS] token fills in: one line per commit. No
@@ -246,9 +270,11 @@ footer { margin-top:auto; }
   border-top:1px solid #eee;
 }
 .comment-main { min-width:0; }
-.comment-main strong { color:rgba(0,0,0,0.87); }
+.comment-main strong { color:rgba(0,0,0,0.87); font-size:13px; }
 .comment-main span { color:#9e9e9e; font-size:12px; margin-left:5px; }
-.comment-main p { margin:3px 0 0; white-space:pre-wrap; }
+/* 13px/20px is the pair Google+ used for comment text, one step under the 14px
+   a post's body is set in. */
+.comment-main p { margin:3px 0 0; white-space:pre-wrap; font-size:13px; line-height:20px; }
 .comment-form { display:flex; gap:10px; padding-top:15px; }
 .comment-inputs { flex:1; }
 input, textarea, select {
@@ -323,10 +349,11 @@ footer {
   .app { display:block; }
   .rail {
     display:grid;
-    grid-template-columns:auto minmax(0, 1fr);
-    grid-template-areas:
-      "brand foot"
-      "links links";
+    /* One row: the scrolling link strip, then the theme and sign-out at its
+       right edge. (The bar above already carries the logo and the search, so
+       there is no brand row left to give a line to.) */
+    grid-template-columns:minmax(0, 1fr) auto;
+    grid-template-areas:"links foot";
     align-items:center;
     column-gap:8px;
     height:auto;
@@ -353,6 +380,9 @@ footer {
     flex-wrap:nowrap;
     overflow-x:auto;
     gap:2px;
+    /* Without this the strip sizes itself to every link it holds and pushes
+       the page wider than the phone, instead of scrolling inside its row. */
+    min-width:0;
   }
   .rail-nav, .rail-group {
     flex-direction:row;
@@ -427,16 +457,40 @@ small { color:#9e9e9e; font-weight:normal; display:block; margin-top:4px; }
 .avatar-img { object-fit:cover; overflow:hidden; }
 .site-avatar { background:#555; }
 .login-to-comment { margin-top:15px; padding:14px; background:#f7f7f7; border:1px solid #e4e4e4; color:rgba(0,0,0,0.54); }
-.profile-card { background:#fff; border:1px solid #e0e0e0; margin-bottom:18px; }
-.profile-cover { height:105px; background:linear-gradient(135deg,#555,#888); position:relative; overflow:hidden; }
+/* A profile is the one page Google+ let out of the stream column: the cover ran
+   the full width of the content area (1213px in the archived page), with only
+   the stream below it held to 568px. */
+body.profile-page .feed { width:min(1000px, 100%); }
+.profile-card { background:#fff; border:0; border-radius:2px; margin-bottom:8px; overflow:hidden; }
+.profile-cover { height:240px; background:linear-gradient(135deg,#555,#888); position:relative; overflow:hidden; }
 .profile-banner { display:block; width:100%; height:100%; object-fit:cover; }
-.profile-info { position:relative; padding:0 22px 24px; }
-.profile-avatar { width:92px; height:92px; margin-top:-46px; border:4px solid #fff; border-radius:50%; background:#555; color:#fff; display:flex; align-items:center; justify-content:center; font-size:32px; font-weight:500; object-fit:cover; }
-.profile-info h1 { margin:8px 0 0; font-size:28px; font-weight:400; }
+.profile-info { position:relative; padding:0 24px 24px; }
+.profile-avatar { width:120px; height:120px; margin-top:-60px; border:4px solid #fff; border-radius:50%; background:#555; color:#fff; display:flex; align-items:center; justify-content:center; font-size:40px; font-weight:500; object-fit:cover; }
+.profile-info h1 { margin:10px 0 0; font-size:30px; font-weight:500; line-height:36px; }
 .username { color:rgba(0,0,0,0.54); margin-top:1px; }
 .user-id { margin-top:8px; color:rgba(0,0,0,0.54); font-size:12px; }
 .user-id code { background:#f1f1f1; padding:2px 5px; }
-.section-label { font-weight:500; color:rgba(0,0,0,0.54); border-bottom:1px solid #e0e0e0; padding:10px 3px; margin-top:18px; }
+.section-label { font-weight:500; color:rgba(0,0,0,0.54); border-bottom:0; padding:0 2px; margin-top:32px; }
+/* The tab strip under a profile header: plain labels on a hairline, current one
+   in Google blue with a 3px bar - its Material tab shape. */
+.profile-tabs {
+  display:flex; gap:0; margin:0 0 12px; border-bottom:1px solid #e0e0e0;
+  flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none;
+}
+.profile-tabs::-webkit-scrollbar { display:none; }
+.ptab {
+  position:relative; flex:0 0 auto; padding:14px 20px;
+  color:rgba(0,0,0,0.54); font-size:14px; font-weight:500;
+  text-transform:uppercase; letter-spacing:.3px; text-decoration:none;
+}
+.ptab:hover { color:#4285f4; background:#f5f5f5; text-decoration:none; }
+.ptab.active { color:#4285f4; }
+.ptab.active::after {
+  content:""; position:absolute; left:12px; right:12px; bottom:-1px; height:3px;
+  background:#4285f4; border-radius:3px 3px 0 0;
+}
+/* The stream under a wide profile keeps the normal column width. */
+.profile-stream { width:min(568px, 100%); margin:0 auto; }
 .profile-comment { background:#fff; border:1px solid #e0e0e0; border-top:0; padding:14px 18px; }
 .profile-comment p { margin:0 0 6px; white-space:pre-wrap; }
 .profile-comment span { color:#9e9e9e; font-size:12px; }
@@ -567,23 +621,32 @@ small { color:#9e9e9e; font-weight:normal; display:block; margin-top:4px; }
 }
 
 /* Feed tabs: All / Community / Systematics --------------------------------- */
+/* Stream tabs, in Google+'s Material shape: plain labels on a hairline, with a
+   3px blue bar under the current one rather than a boxed tab. */
 .tabs {
-  display:flex; gap:2px; margin:0 0 12px;  border-bottom:1px solid #e0e0e0;
-  flex-wrap:wrap; /* on a phone the four tabs are wider than the screen */
+  display:flex; gap:0; margin:0 0 8px; border-bottom:1px solid #e0e0e0;
+  /* One row that scrolls sideways rather than wrapping into two: the reference
+     kept its tab strip on a single line, and a phone needs the same. */
+  flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none;
 }
+.tabs::-webkit-scrollbar { display:none; }
+.tab { flex:0 0 auto; }
 .tab {
-  padding:9px 15px; color:rgba(0,0,0,0.54); font-size:13px; text-decoration:none;
-  border:1px solid transparent; border-bottom:0; margin-bottom:-1px;
+  position:relative; padding:14px 16px; color:rgba(0,0,0,0.54);
+  font-size:14px; font-weight:500; text-decoration:none; border:0; background:none;
+  text-transform:uppercase; letter-spacing:.3px;
 }
-.tab:hover { color:#4285f4; }
-.tab.active {
-  background:#fff; border-color:#e0e0e0; color:rgba(0,0,0,0.87); font-weight:500;
+.tab:hover { color:#4285f4; background:#f5f5f5; text-decoration:none; }
+.tab.active { color:#4285f4; background:none; }
+.tab.active::after {
+  content:""; position:absolute; left:12px; right:12px; bottom:-1px; height:3px;
+  background:#4285f4; border-radius:3px 3px 0 0;
 }
 .tab-count {
-  display:inline-block; margin-left:5px; padding:0 6px; border-radius:9px;
-  background:#eee; color:rgba(0,0,0,0.54); font-size:12px; font-weight:normal;
+  display:inline-block; margin-left:6px; color:inherit; font-size:12px; font-weight:400;
+  opacity:.75;
 }
-.tab.active .tab-count { background:#e6effd; color:#4285f4; }
+.tab.active .tab-count { opacity:1; }
 .feed-cta { margin:0 0 14px; }
 
 /* Post author, category badge and votes ------------------------------------ */
@@ -600,24 +663,32 @@ small { color:#9e9e9e; font-weight:normal; display:block; margin-top:4px; }
 .post-manage form { margin:0; }
 .post-head a { color:inherit; }
 
+/* The action row at the foot of a Google+ card: +1, comment and share as flat
+   icon-and-label buttons over the card's full width, blue when the +1 is yours.
+   There is no boxed "vote" control in the reference, so the buttons are bare. */
 .vote-bar {
-  display:flex; align-items:center; gap:14px;
-  padding:8px 20px; border-top:1px solid #eee;
-  font-size:12px; color:rgba(0,0,0,0.54);
+  display:flex; align-items:stretch; gap:0; padding:0;
+  border-top:1px solid #e0e0e0; color:rgba(0,0,0,0.54);
 }
-.vote-bar .score { font-weight:500; color:rgba(0,0,0,0.87); min-width:20px; }
-.score.positive { color:#1a7f37; }
-.score.negative { color:#c5221f; }
-.vote-form { display:flex; gap:4px; }
-.vote {
-  border:1px solid #e0e0e0; background:#fafafa; color:rgba(0,0,0,0.54); cursor:pointer;
-  font-size:12px; line-height:1; padding:5px 9px; border-radius:2px;
+.vote-form { display:flex; flex:1 1 auto; min-width:0; margin:0; }
+.post-action {
+  display:flex; flex:1 1 auto; align-items:center; justify-content:center; gap:8px;
+  min-width:0; height:44px; padding:0 8px; border:0; background:none;
+  color:rgba(0,0,0,0.54); font:inherit; font-size:14px; font-weight:500;
+  text-decoration:none; cursor:pointer; white-space:nowrap;
 }
-.vote:hover { border-color:#4285f4; color:#4285f4; }
-.vote.active { background:#4285f4; border-color:#4285f4; color:#fff; }
-.vote.signin { text-decoration:none; padding:4px 9px; }
-.comment-link { color:rgba(0,0,0,0.54); text-decoration:none; }
-.comment-link:hover { color:#4285f4; }
+.post-action:hover { background:#f5f5f5; color:rgba(0,0,0,0.87); text-decoration:none; }
+.post-action svg { width:22px; height:22px; fill:currentColor; opacity:.62; flex:0 0 auto; }
+/* A +1 of your own was Google red, not blue: the reference's pressed state. */
+.post-action.active { color:#db4437; }
+.post-action.active svg { opacity:1; }
+.post-action.down { flex:0 0 48px; }
+.action-count { font-weight:400; }
+.post-action.signin { color:#4285f4; }
+.vote-bar .score.positive { color:#1a7f37; }
+.vote-bar .score.negative { color:#c5221f; }
+.comment-link { color:inherit; text-decoration:none; }
+.comment-link:hover { color:rgba(0,0,0,0.87); }
 
 /* Threaded comments -------------------------------------------------------- */
 .comment-meta a { color:inherit; }
@@ -1143,6 +1214,7 @@ html[data-theme="dark"] .rail-note strong { color:#cfd6e2; }
 html[data-theme="dark"] .feed-header { background:#191c22; border-color:#2c313c; }
 html[data-theme="dark"] .feed-header p { color:#97a0b1; }
 html[data-theme="dark"] .post-card { border-color:#2c313c; }
+html[data-theme="dark"] .gp-lockup { filter:invert(1) brightness(1.55); }
 html[data-theme="dark"] .avatar,
 html[data-theme="dark"] .small-avatar,
 html[data-theme="dark"] .site-avatar { background:#39404e; color:#fff; }
@@ -1330,9 +1402,11 @@ html[data-theme="dark"] button.danger-button:hover {
 .badge-deleted { background: var(--surface-3); color: var(--muted); }
 .badge-ban { background: var(--accent-soft); color: var(--accent); }
 .badge-new { background: var(--accent); color: var(--on-accent); }
+/* Google+ wrote section titles straight onto the page: 16px/500 in the
+   secondary ink, 32px above the block they name - not an uppercase 12px label. */
 .section-label {
-  margin: 22px 0 10px; color: var(--muted); font-size: 12px; font-weight: 500;
-  text-transform: uppercase; letter-spacing: .06em;
+  margin: 32px 0 8px; color: var(--muted); font-size: 16px; font-weight: 500;
+  text-transform: none; letter-spacing: 0;
 }
 .section-heading { display:flex; align-items:center; gap:10px; margin:0 0 8px; }
 .section-heading h2 { margin:0; font-size:16px; font-weight:500; }
@@ -1818,6 +1892,118 @@ blockquote { margin:8px 0; padding:8px 12px; border-left:3px solid var(--line); 
   .community-header { flex-direction:column; align-items:flex-start; }
   .convo-head { flex-wrap:wrap; }
   .convo-tools { margin-left:0; width:100%; }
-  .p
+  .poll-bar { max-width:100%; }
+}
 
 .auth-forgot { margin:-6px 0 14px; font-size:12px; }
+
+/* The 64px Google+ top bar ------------------------------------------------
+   G+ put the logo, the search field and the bell/envelope/avatar in one white
+   bar along the top of every page, with the nav underneath it. It is sticky so
+   the search and the badge stay reachable while the stream scrolls. */
+.topbar {
+  position:sticky; top:0; z-index:40;
+  display:flex; align-items:center; gap:16px;
+  /* 64px high, 8px side padding and a 0 1px 8px shadow instead of a rule: the
+     archived bar reports exactly those (height:64px; padding:0 8px;
+     box-shadow:rgba(0,0,0,.3) 0 1px 8px 0). */
+  height:64px; padding:0 8px;
+  background:#fff; border:0; box-shadow:0 1px 8px rgba(0,0,0,.3);
+}
+.topbar-brand {
+  display:flex; align-items:center; gap:10px; flex:0 0 auto;
+  padding:0 8px; color:#212121; font-size:20px; letter-spacing:-.2px;
+}
+.topbar-brand:hover { text-decoration:none; }
+/* The real 88x24 lockup, served from its own 2x file so it stays crisp. */
+.gp-lockup { display:block; width:88px; height:24px; max-width:none; }
+.topbar-search { position:relative; flex:0 1 480px; min-width:0; margin:0; }
+.topbar-search input {
+  width:100%; height:36px; margin:0; padding:0 12px 0 44px;
+  border:1px solid #e0e0e0; border-radius:2px; background:#fff;
+  font-size:14px;
+}
+.topbar-search input:focus { border-color:#1a73e8; box-shadow:none; }
+.topbar-search-icon {
+  position:absolute; left:12px; top:8px; color:rgba(0,0,0,0.54);
+  display:flex; pointer-events:none;
+}
+.topbar-actions { margin-left:auto; display:flex; align-items:center; gap:4px; }
+.topbar-icon {
+  position:relative; display:flex; align-items:center; justify-content:center;
+  width:40px; height:40px; border-radius:50%; color:rgba(0,0,0,0.54);
+}
+.topbar-icon:hover { background:#f5f5f5; color:rgba(0,0,0,0.87); text-decoration:none; }
+.topbar-badge {
+  position:absolute; top:3px; right:2px; min-width:16px; height:16px; padding:0 4px;
+  border-radius:8px; background:#db4437; color:#fff;
+  font-size:10px; line-height:16px; text-align:center; font-weight:500;
+}
+.topbar-avatar {
+  display:flex; align-items:center; justify-content:center;
+  width:40px; height:40px; border-radius:50%;
+}
+.topbar-avatar:hover { background:#f5f5f5; }
+.topbar-avatar img { width:32px; height:32px; border-radius:50%; object-fit:cover; }
+.topbar-avatar .small-avatar { width:32px; height:32px; }
+.topbar-signin { color:#1a73e8; font-weight:500; padding:0 8px; }
+.topbar-join { margin:0 0 0 4px; }
+
+/* Google+'s primary button: filled in its own link blue, 3px radius, an
+   uppercase 14px/500 white label. Used for the stream's call to action and the
+   signed-out Join. */
+.button.primary, button.primary {
+  background:#4285f4; border-color:#4285f4; color:#fff;
+  border-radius:3px; font-weight:500; text-transform:uppercase; letter-spacing:.4px;
+}
+.button.primary:hover, button.primary:hover { background:#3367d6; border-color:#3367d6; color:#fff; }
+
+/* The share box at the top of the stream: avatar, a grey prompt that opens the
+   composer, and nothing else - G+ kept photo/video behind the composer itself. */
+.composer-card {
+  display:flex; align-items:center; gap:12px;
+  background:var(--card); border:1px solid #e0e0e0; border-radius:2px;
+  padding:12px 16px; margin-bottom:8px;
+}
+.composer-card .avatar { width:36px; height:36px; font-size:12px; }
+.composer-prompt {
+  flex:1; min-width:0; padding:9px 12px; border-radius:2px;
+  background:#f5f5f5; color:rgba(0,0,0,0.54);
+}
+.composer-prompt:hover { background:#eeeeee; color:rgba(0,0,0,0.87); text-decoration:none; }
+.composer-card .button { margin:0; }
+
+/* Phones: the bar keeps the logo and the actions and lets the search shrink. */
+@media (max-width: 850px) {
+  .topbar { height:56px; padding:0 8px; gap:8px; }
+  .topbar-brand { padding:0 4px; }
+  .gp-lockup { width:74px; height:20px; }
+  .topbar-search { flex:1 1 auto; }
+  .topbar-search input { height:34px; }
+  .topbar-search-icon { top:7px; }
+  .app { min-height:calc(100vh - 56px); }
+  /* The nav strip already has its phone layout in the 850px block above; here
+     it only needs a smaller glyph to match its shorter rows. */
+  .rail-icon svg { width:20px; height:20px; }
+}
+@media (max-width: 560px) {
+  .topbar-actions .topbar-icon[href*="notifications"] { display:none; }
+  .profile-cover { height:160px; }
+  .profile-avatar { width:80px; height:80px; margin-top:-40px; font-size:28px; }
+}
+
+/* Dark theme for the new chrome. The rest of the file already remaps the
+   tokens, so only the surfaces that are hard-coded above need naming here. */
+html[data-theme="dark"] .topbar { background:#191c22; border-bottom-color:#2c313c; }
+html[data-theme="dark"] .topbar-brand { color:var(--text); }
+html[data-theme="dark"] .topbar-search input { background:#15181e; border-color:#2c313c; color:var(--text); }
+html[data-theme="dark"] .topbar-icon { color:rgba(255,255,255,0.62); }
+html[data-theme="dark"] .topbar-icon:hover,
+html[data-theme="dark"] .topbar-avatar:hover { background:#232833; color:var(--text); }
+html[data-theme="dark"] .rail-link.is-active { background:#1e3050; color:var(--link); }
+html[data-theme="dark"] .rail-link.is-active .rail-icon { color:var(--link); }
+html[data-theme="dark"] .post-action:hover { background:#21252e; color:var(--text); }
+html[data-theme="dark"] .tab:hover { background:#21252e; }
+html[data-theme="dark"] .composer-card { background:var(--card); border-color:var(--line); }
+html[data-theme="dark"] .composer-prompt { background:#21252e; color:var(--text-soft); }
+html[data-theme="dark"] .composer-prompt:hover { background:#262b36; color:var(--text); }

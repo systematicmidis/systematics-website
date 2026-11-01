@@ -105,14 +105,12 @@
       {% endif %}
       <div class="post-author">
         <strong>{% if post.page_name %}<a href="{{ url_for('page_detail', slug=post.page_slug) }}">{{ post.page_name }}</a><span class="page-as"> · Page</span>{% elif post.author_deleted %}{{ post.author_display_name }}{% else %}<a class="hover-name" href="{{ url_for('profile', username=post.author_username) }}" data-hovercard="{{ url_for('hovercard', username=post.author_username) }}">{{ post.author_display_name }}</a>{% endif %}</strong>
-        <span>
+        <span class="post-sub">
+          <span class="post-audience"{% if post.audience and post.audience != 'public' %} title="The audience this was shared with"{% endif %}>{{ audience_name if post.audience and post.audience != 'public' else 'Public' }}</span>
+          <span aria-hidden="true">·</span>
           {{ category_badge(post) }}
-          {%- if post.audience and post.audience != 'public' %}
-            <span class="badge badge-limited" title="The audience this was shared with">🔒 {{ audience_name }}</span>
-          {%- endif %}
           {%- if my_circle %}<span class="badge badge-circle">◎ {{ my_circle.name }}</span>{% endif %}
           {%- if post.pinned %}<span class="badge badge-pinned">Pinned</span>{% endif %}
-          · <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }} UTC</a>
           {% if post.status != 'published' %} · {{ post.status }}{% endif %}
         </span>
       </div>
@@ -120,9 +118,10 @@
       <div class="avatar site-avatar">BM</div>
       <div class="post-author">
         <strong>Systematics Black Midi site</strong>
-        <span>{{ category_badge(post) }} · <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }}</a></span>
+        <span class="post-sub"><span class="post-audience">Public</span> · {{ category_badge(post) }}</span>
       </div>
     {% endif %}
+    <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }} UTC</a>
     {% if can_manage %}
       <div class="post-manage">
         <a class="more" href="{{ url_for('edit_post', post_id=post.id) }}">Edit</a>

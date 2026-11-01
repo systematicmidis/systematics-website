@@ -2,6 +2,10 @@
 {% from "_widgets.html" import avatar, follow_button, message_button, person_row,
   post_card, social_strip, social_list with context %}
 {% block title %}{{ user.display_name }} · Systematics Black Midi site{% endblock %}
+{# A profile is the one page Google+ let out of the stream column: the cover ran
+   the full width of the content area, and only the stream under it stayed 568px.
+   ``profile-page`` widens the column in style.css. #}
+{% block page_class %}profile-page{% endblock %}
 {% block content %}
 {# Google+-style header: cover, avatar, name, tagline, follower counts and the
    Follow button, then the profile's own posts as a stream. #}
@@ -69,8 +73,19 @@
   </div>
 </div>
 
+{# Google+ put a tab strip between the header and the stream (Posts, Photos,
+   About, and whatever else the person filled in). These jump to the sections
+   the profile already has; gplus.js moves the underline to the one clicked. #}
+<nav class="profile-tabs" aria-label="Profile sections">
+  <a class="ptab active" href="#posts" data-ptab>Posts</a>
+  {% if gplus and photo_total %}<a class="ptab" href="#photos" data-ptab>Photos</a>{% endif %}
+  {% if gplus and collections %}<a class="ptab" href="#collections" data-ptab>Collections</a>{% endif %}
+  <a class="ptab" href="#about" data-ptab>About</a>
+  <a class="ptab" href="#comments" data-ptab>Comments</a>
+</nav>
+
 {% if gplus and collections %}
-  <div class="section-label">Collections</div>
+  <div class="section-label" id="collections">Collections</div>
   <div class="collection-strip">
     {% for collection in collections %}
       <a class="collection-card" href="{{ url_for('collection', collection_id=collection.id) }}">
@@ -94,7 +109,7 @@
 {% endif %}
 
 {% if gplus and photo_total %}
-  <div class="section-label">Photos</div>
+  <div class="section-label" id="photos">Photos</div>
   <div class="profile-photo-strip">
     <a class="photos-more" href="{{ url_for('photos', username=user.username) }}">
       See all {{ photo_total }} photo{% if photo_total != 1 %}s{% endif %} →
@@ -177,12 +192,16 @@
   </dl>
 </div>
 
+{# The stream keeps the 568px column even on a wide profile - the reference did
+   the same under its full-width cover. #}
 <div class="section-label" id="posts">Posts ({{ posts|length }})</div>
+<div class="profile-stream">
 {% for item in posts %}
   {{ post_card(item) }}
 {% else %}
 <div class="empty">No posts yet.{% if is_self %} <a href="{{ url_for('new_post') }}">Write one.</a>{% endif %}</div>
 {% endfor %}
+</div>
 
 <div class="section-label" id="comments">Recent comments</div>
 {% for comment in comments %}
