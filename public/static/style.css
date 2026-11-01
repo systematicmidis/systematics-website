@@ -2148,3 +2148,46 @@ html[data-theme="dark"] .full-post .action-count { color:var(--muted); }
 .comment-actions details form { display:flex; width:100%; }
 .comment-actions details .comment-inputs { flex:1 1 auto; min-width:0; }
 .comment-actions details textarea { width:100%; }
+
+/* Dark theme, second pass ----------------------------------------------------
+   The Google+ revival blocks were written against Google+'s own inks, which are
+   literals rather than tokens in places (a 14px/500 audience, a #9e9e9e stamp,
+   the permalink's whole secondary layer). On the dark card those render as
+   near-black on near-black, so every one is remapped here. These rules sit at
+   the foot of the file on purpose: the light values they replace live in blocks
+   with equal weight, and source order is what settles the tie. */
+html[data-theme="dark"] .post-audience,
+html[data-theme="dark"] .post-head .post-stamp,
+html[data-theme="dark"] .full-post .post-head .post-stamp,
+html[data-theme="dark"] .full-post .shared-line,
+html[data-theme="dark"] .full-post .post-actions,
+html[data-theme="dark"] .full-post .post-actions .link-button,
+html[data-theme="dark"] .full-post .post-actions summary,
+html[data-theme="dark"] .full-post .comment-meta .comment-plus,
+html[data-theme="dark"] .full-post .comment-date,
+html[data-theme="dark"] .full-post .comment-actions .vote,
+html[data-theme="dark"] .full-post .comment-actions summary,
+html[data-theme="dark"] .full-post .comment-actions button,
+html[data-theme="dark"] .full-post .comment-actions .link-button,
+html[data-theme="dark"] .ptab,
+html[data-theme="dark"] .topbar-search-icon { color:var(--muted); }
+/* The vote bar's own controls carry a literal ink, so they need the theme's two
+   states restated after the general rule above. */
+html[data-theme="dark"] .post-action { color:var(--muted); }
+html[data-theme="dark"] .post-action.signin { color:var(--link); }
+html[data-theme="dark"] .post-action.active { color:var(--accent); }
+html[data-theme="dark"] .post-action:hover { color:var(--text); }
+/* Blue literals: comments' submit button, the "View activity" link, the profile
+   tab strip and its underline. */
+html[data-theme="dark"] .full-post .shared-line a,
+html[data-theme="dark"] .full-post .comment-form .comment-inputs button,
+html[data-theme="dark"] .ptab:hover,
+html[data-theme="dark"] .ptab.active { color:var(--link); }
+html[data-theme="dark"] .ptab:hover { background:#232833; }
+html[data-theme="dark"] .ptab.active::after { background:var(--link); }
+/* A filled Follow button is an anchor, so the theme's blanket ``a`` colour
+   out-ranks its own white label and left blue text on a blue fill. Its label is
+   restated here; the "following" outline state below still wins on weight. */
+html[data-theme="dark"] .follow-button {
+  background:#4285f4; border-color:#4285f4; color:#fff;
+}

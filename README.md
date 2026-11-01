@@ -626,6 +626,25 @@ are `#eeeeee`/`#f5f5f5`/`#fafafa` - so `--bg` keeps the `#f1f3f4` it already had
 cannot be read out of a still image or an 11-second clip of a static page, which is why the only
 motion values here are the ones the CSS declares.
 
+### Dark theme
+
+The theme is `data-theme="dark"` on `<html>`, set before first paint by the inline script in
+`base.html` and toggled by `public/static/theme.js`. It works in two layers: the token block
+remaps every variable (`--bg`, `--card`, `--text`, `--link`, ...), and a block of
+`html[data-theme="dark"]` rules remaps the older parts of the file that were written with
+Google+'s literal inks. That second layer is the part to keep an eye on: Google+'s secondary ink
+is `rgba(0,0,0,.54)`, so any new rule that copies a value out of the reference - an audience
+label, a timestamp, the permalink's whole secondary layer - is invisible on `#191c22` until it is
+restated for dark. Both layers sit at the foot of the file so equal-weight ties resolve in the
+theme's favour, and the vote bar's buttons and the filled Follow button restate their own
+colours because the theme's blanket `a` colour would otherwise repaint their labels.
+
+Dark mode is verified by measuring the rendered page, not by eye: a probe walks every text node,
+composites its colour over its effective background and flags anything under a 3:1 contrast
+ratio, page by page. At the last pass the home stream, a post permalink, a profile, Explore,
+Communities, Events, Pages, Sparks, Settings and its sub-pages, Circles, Collections, Hangouts,
+Notifications, Search, the composer and the event editor all report zero violations.
+
 ## Followers and profiles
 
 The site is built as a Google+-style network: profiles have a cover, an About block and
