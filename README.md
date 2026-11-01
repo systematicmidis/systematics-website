@@ -548,9 +548,14 @@ shipped.
 **A post's own page is Google+'s reading card**, not the stream's flat sheet: one 530px white
 card with no radius and a `0 1px 4px` shadow, centred on the `#f1f1f1` field. The header is a
 single line - name, then the audience, with the date at the card's right edge - the actions are
-icon-only buttons aligned right in the reference's order (comment, +1, share), and comments are
-plain rows inset 12px with a 36px avatar, a `+N` in the secondary ink and the date far right: no
-boxes and no button chrome. That is the `body.page-post` block at the foot of `style.css`; it is
+three 36px circles right-aligned in the reference's order (comment, +1, share), each count
+immediately to the right of its circle in 12px secondary ink, and comments are plain rows inset
+12px with a 36px avatar, a `+N` in the secondary ink and the date far right: no boxes and no
+button chrome. The circle measurements are the archived page's, read back with the browser's own
+DOM: 8px between a circle and its count, 14px between clusters, the share circle ending 16px in
+from the card's edge, 16px above the row from the last content and 16px below it to the "Shared
+publicly" line. A hover fills the circle only, never a pill around the count - which is why the
+counts sit outside the circle rather than inside a pill-shaped button. That is the `body.page-post` block at the foot of `style.css`; it is
 scoped to the permalink so the stream keeps its flat cards. The site's own extras (Embed, Mute,
 Report, edit history, the share box) sit under Google+'s "Shared publicly · View activity" line
 as 12px secondary text rather than as a second toolbar.

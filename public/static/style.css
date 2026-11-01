@@ -679,6 +679,19 @@ body.profile-page .feed { width:min(1000px, 100%); }
 }
 .post-action:hover { background:#f5f5f5; color:rgba(0,0,0,0.87); text-decoration:none; }
 .post-action svg { width:22px; height:22px; fill:currentColor; opacity:.62; flex:0 0 auto; }
+.action-icon { display:flex; align-items:center; justify-content:center; }
+/* A button in the vote bar is not the site's default form button, whatever type
+   it carries: the global ``button[type=submit]`` rule out-ranks the bare
+   ``.post-action`` rule, and it used to leave the +1 with a grey 1px box and a
+   7px top margin that pushed it below the two icons beside it. */
+form.vote-form button.post-action[type] {
+  border:0; border-radius:0; background:none; box-shadow:none; margin:0;
+  color:rgba(0,0,0,0.54);
+}
+html[data-theme="dark"] form.vote-form button.post-action[type] { color:var(--muted); }
+/* Your own +1 is Google red - the theme's red in the dark palette. */
+form.vote-form button.post-action[type].active,
+html[data-theme="dark"] form.vote-form button.post-action[type].active { color:var(--accent); }
 /* A +1 of your own was Google red, not blue: the reference's pressed state. */
 .post-action.active { color:#db4437; }
 .post-action.active svg { opacity:1; }
@@ -2039,25 +2052,44 @@ body.page-post { background:#f1f1f1; }
 .full-post .post-body h1.post-title { margin:0 0 8px; font-size:14px; line-height:20px; font-weight:500; }
 .full-post .comment-main { flex:1 1 auto; }
 .full-post .post-content, .full-post .post-body p { font-size:14px; line-height:20px; }
-/* The action cluster: three 36px icon buttons at the right edge, counts beside
-   the glyphs, no words. The site's downvote has no counterpart in the
-   reference, so it is not shown here. */
-.full-post .vote-bar { border-top:0; margin:16px 8px 0; justify-content:flex-end; gap:12px; }
+/* The action cluster, measured on the archived permalink: three 36px circles in
+   the order comment, +1, share, each count 8px to the right of its circle in
+   12px #777, 14px between clusters, and the share circle ending 16px in from
+   the card's edge (the row box itself stops 8px short). A hover fills only the
+   circle - never a pill around the count. There are no words, and the site's
+   downvote has no counterpart in the reference, so it is not shown here. */
+.full-post .vote-bar {
+  /* 12px of that gap is the body's own bottom padding, so 4px here makes the
+     16px the archived page leaves between its last content and the row. */
+  border-top:0; margin:4px 8px 0; justify-content:flex-end; gap:8px;
+}
 .full-post .vote-form { flex:0 0 auto; }
+.full-post .post-action {
+  flex:0 0 auto; width:auto; min-width:36px; height:36px;
+  padding:0; gap:0; font-size:13px; background:none;
+}
+.full-post .action-icon {
+  width:36px; height:36px; border-radius:50%;
+}
+.full-post .share-action { margin-right:8px; }
+.full-post .post-action:hover { background:none; }
+.full-post .post-action:hover .action-icon { background:#eee; }
+/* 18px glyphs at full strength inside the 36px circle: the archived paths fill
+   #757575 with no opacity, rather than the stream's softened 22px glyph. */
+.full-post .post-action svg { width:18px; height:18px; opacity:1; }
+.full-post .post-action .action-label { display:none; }
+.full-post .post-action.down { display:none; }
+.full-post .action-count {
+  margin:0 6px 0 8px; color:rgba(0,0,0,0.54); font-size:12px; font-weight:400;
+}
 /* The reference's order is comment, +1, share - the plus-one sits in the
    middle, not first as it does in the stream. */
 .full-post .comment-link { order:1; }
 .full-post .vote-form { order:2; }
 .full-post .share-action { order:3; }
-.full-post .post-action {
-  flex:0 0 auto; width:auto; min-width:36px; height:36px;
-  padding:0 5px; gap:3px; font-size:13px;
-}
-.full-post .post-action svg { width:22px; height:22px; }
-.full-post .post-action .action-label { display:none; }
-.full-post .post-action.down { display:none; }
 .full-post .shared-line {
-  margin:0; padding:0 16px 4px; font-size:13px; color:rgba(0,0,0,0.54);
+  /* The archived page left 16px between the action row and this line. */
+  margin:14px 0 0; padding:0 16px 4px; font-size:13px; color:rgba(0,0,0,0.54);
 }
 .full-post .shared-line a { color:#4285f4; }
 /* The site's extra controls (Embed, Mute, Report, edit history) live under the
@@ -2102,8 +2134,10 @@ body.page-post { background:#f1f1f1; }
 .full-post .login-to-comment { margin:0 16px 16px; }
 html[data-theme="dark"] body.page-post { background:var(--bg); }
 html[data-theme="dark"] .post-card.full-post { background:var(--card); box-shadow:none; }
-html[data-theme="dark"] .full-post .post-action:hover,
+html[data-theme="dark"] .full-post .post-action:hover { background:none; }
+html[data-theme="dark"] .full-post .post-action:hover .action-icon,
 html[data-theme="dark"] .full-post .comment-actions button:hover { background:#21252e; }
+html[data-theme="dark"] .full-post .action-count { color:var(--muted); }
 
 /* A reply or report form opened inside a comment's action row is a block, not
    the 96px-wide inline box its parent control is: it has an avatar, a textarea
