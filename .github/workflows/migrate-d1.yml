@@ -1,0 +1,71 @@
+name: Migrate D1
+
+# Applies pending files in migrations/ to the production D1 database.
+#
+# Why this exists next to the deploy workflow: the deploy ships code and never
+# schema, and every revival-only read is gated on the migration that adds its
+# tables. Without this job a push deploys the new screens but they stay hidden
+# behind "Run npm run db:remote" until somebody with a logged-in wrangler does
+# it by hand - which is exactly how migration 0016-0018 were left unapplied
+# while production served the old site.
+#
+# It is deliberately a separate workflow, not a step in Deploy Worker:
+#   * a migration failure gets its own red check instead of being buried in a
+#     deploy log nobody reads;
+#   * it uses the same two repository secrets, so no new credential is needed;
+#   * wrangler records what has run in d1_migrations, so re-running is a no-op.
+#
+# The command is the same one the README documents for a laptop:
+#   npm run db:remote
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: migrate-d1-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    name: Apply pending D1 migrations
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+
+      # pywrangler shells out to npx wrangler, so Node is required here too.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install the Python toolchain and local wrangler
+        run: |
+          uv sync --group dev
+          npm ci
+
+      - name: Fail early if the Cloudflare credentials are missing
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as repository secrets."
+            exit 1
+          fi
+
+      # --remote is the whole point: without it wrangler migrates the local
+      # miniflare database in the runner and production never changes.
+      - name: Apply pending migrations
+        run: |
+          set -o pipefail
+          uv run pywrangler d1 migrations apply systematics-black-midi-db --remote

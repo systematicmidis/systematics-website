@@ -783,19 +783,23 @@ npm run db:remote    # the same against production D1
 Add a new numbered file (for example `migrations/0007_add_post_tags.sql`) instead of editing
 one that has already been applied. Migrations run in filename order.
 
-**Migrations 0016, 0017, 0018 and pushes.** The GitHub Action deploys code and never
-migrations, so a push that carries a revival feature lands before its tables do. That order is
-safe on purpose: every revival-only read is gated on `gplus_schema()` (0016),
-`gplus2_schema()` (0017) or `gplus3_schema()` (0018), so the deployed site keeps its old feed
-and hides the new screens until you run:
+**Migrations and pushes.** Two workflows run on a push to `main`:
+`Deploy Worker` ships the code, and `Migrate D1` applies every pending file in
+`migrations/` to production with the same two repository secrets. They run in parallel, so the
+order between them is not guaranteed - which is safe on purpose, because every revival-only
+read is gated on `gplus_schema()` (0016), `gplus2_schema()` (0017) or `gplus3_schema()` (0018).
+If the migration lands first the new screens are simply visible; if the code lands first the
+site keeps its old feed for the seconds in between rather than answering with error 1101.
+
+Migration is a separate workflow so its failure is its own red check instead of an unexplained
+deploy failure. `npm run db:remote` still does the same job from a laptop (and is how you
+re-run it by hand if the token ever lacks D1 permissions):
 
 ```bash
 npm run db:remote
 ```
 
 The command applies every pending migration in filename order, so one run covers all of them.
-Running it before the deploy is still tidier - the new screens appear the moment the deploy finishes
-instead of after a manual step.
 
 ## Deploy
 
@@ -850,8 +854,8 @@ deploy: `~/.local/bin/uv run pywrangler deploy`. Its build image is Node-based a
 Workers are not a documented Workers Builds target, so treat that as something to try, not a
 supported path.
 
-Either way, `npm run db:remote` is still a manual step you run yourself: builds deploy code,
-not database migrations.
+The `Migrate D1` workflow applies schema changes on push (see ["Schema changes"](#schema-changes));
+`npm run db:remote` is the same command from a laptop if you would rather run it yourself.
 
 ## Notes and gotchas
 
