@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Photos · {{ user.display_name }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow"><a href="{{ url_for('profile', username=user.username) }}">{{ user.display_name }}</a></p>
+  <h1>Photos</h1>
+  <p>{{ rows|length }} picture{% if rows|length != 1 %}s{% endif %} shared in posts.</p>
+</div>
+
+<div class="photo-grid">
+  {% for row in rows %}
+    <a class="photo-tile" href="{{ url_for('uploads', filename=row.image.filename) }}"
+       data-lightbox="photos" title="{{ row.post.title }}">
+      <img src="{{ url_for('uploads', filename=row.image.filename) }}" alt="" loading="lazy">
+      <span class="photo-tile-caption">{{ row.post.title|truncate(60) }}</span>
+    </a>
+  {% else %}
+    <div class="empty">No photos yet.</div>
+  {% endfor %}
+</div>
+
+{% if albums is defined %}
+  <div class="section-label">Albums</div>
+  <div class="collection-strip">
+    {% for item in albums %}
+      <a class="collection-card" href="{{ url_for('album', album_id=item.id) }}">
+        <span class="collection-name">{{ item.name }}</span>
+        <span class="collection-count">{{ item.post_count }} post{% if item.post_count != 1 %}s{% endif %}</span>
+      </a>
+    {% endfor %}
+  </div>
+  {% if state.is_self %}
+    <section class="settings-card">
+      <h2>Create an album</h2>
+      <form method="post" action="{{ url_for('create_album') }}">
+        <div class="editor-row">
+          <label>Name
+            <input name="name" maxlength="{{ max_album_name }}" required placeholder="Live sets">
+          </label>
+          <label>Description
+            <input name="description" maxlength="{{ max_album_description }}" placeholder="Optional">
+          </label>
+        </div>
+        <div class="actions"><button type="submit">Create album</button></div>
+      </form>
+    </section>
+  {% endif %}
+{% endif %}
+
+{% if tagged_posts %}
+  <div class="section-label">Photos of you</div>
+  <div class="photo-grid">
+    {% for item in tagged_posts %}
+      {% for image in item.gallery %}
+        <a class="photo-tile" href="{{ url_for('uploads', filename=image.filename) }}"
+           data-lightbox="tagged" title="{{ item.title }}">
+          <img src="{{ url_for('uploads', filename=image.filename) }}" alt="" loading="lazy">
+          <span class="photo-tile-caption">{{ item.title|truncate(60) }}</span>
+        </a>
+      {% endfor %}
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

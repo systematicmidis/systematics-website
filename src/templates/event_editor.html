@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}New event · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="editor">
+  <p class="eyebrow">EVENT</p>
+  <h1>Create an event</h1>
+  <form method="post">
+    <label>Title
+      <input name="title" maxlength="{{ max_title }}" required>
+    </label>
+    <label>When
+      <input type="datetime-local" name="starts_at" required>
+    </label>
+    <label>Where
+      <input name="location" maxlength="{{ max_location }}" placeholder="Online, or somewhere real">
+    </label>
+    <label>Details
+      <textarea name="description" rows="6" maxlength="{{ max_description }}"></textarea>
+    </label>
+    <div class="actions">
+      <button type="submit">Create event</button>
+      <a href="{{ url_for('events') }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import avatar, post_card, small_avatar with context %}
+{% block title %}{{ page.name }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="profile-card">
+  <div class="profile-cover">
+    {% if page.banner %}
+      <img class="profile-banner" src="{{ url_for('uploads', filename=page.banner) }}" alt="">
+    {% endif %}
+  </div>
+  <div class="profile-info">
+    {% if page.avatar %}
+      <img class="profile-avatar avatar-img" src="{{ url_for('uploads', filename=page.avatar) }}" alt="">
+    {% else %}
+      <div class="profile-avatar">{{ page.name[:1]|upper }}</div>
+    {% endif %}
+    <div class="profile-name-row">
+      <div>
+        <h1>{{ page.name }} <span class="badge badge-joined">Page</span></h1>
+        <div class="username">/pages/{{ page.slug }}</div>
+        {% if page.tagline %}<p class="profile-tagline">{{ page.tagline }}</p>{% endif %}
+      </div>
+      <div class="profile-actions">
+        {% if can_manage %}
+          <a class="button" href="{{ url_for('edit_page', slug=page.slug) }}">Edit page</a>
+          <a class="button" href="{{ url_for('new_post') }}">Write as this page</a>
+        {% endif %}
+        {% if is_owner %}
+          <form method="post" action="{{ url_for('delete_page', slug=page.slug) }}"
+                onsubmit="return confirm('Delete this page? Its posts stay on their authors\' profiles.')">
+            <button class="link-button danger" type="submit">Delete page</button>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+    {% if page.about %}<p class="profile-bio">{{ page.about|linkify }}</p>{% endif %}
+    <div class="profile-stats">
+      <span><strong>{{ post_count }}</strong> post{% if post_count != 1 %}s{% endif %}</span>
+      <span>Owned by <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a></span>
+    </div>
+  </div>
+</div>
+
+{% if managers %}
+  <div class="section-label">Managers</div>
+  <div class="people-card">
+    {% for person in managers %}
+      <div class="person-row">
+        {{ avatar(person.profile_picture, person.display_name) }}
+        <div class="person-main">
+          <a href="{{ url_for('profile', username=person.username) }}"><strong>{{ person.display_name }}</strong></a>
+          <span class="person-meta">@{{ person.username }} · {{ person.role }}</span>
+        </div>
+        {% if is_owner and person.role != 'owner' %}
+          <form method="post" action="{{ url_for('remove_page_manager', slug=page.slug, user_id=person.id) }}">
+            <button class="link-button danger" type="submit">Remove</button>
+          </form>
+        {% endif %}
+      </div>
+    {% endfor %}
+    {% if is_owner %}
+      <form class="inline-form" method="post" action="{{ url_for('add_page_manager', slug=page.slug) }}">
+        <input name="username" placeholder="@username" required maxlength="24">
+        <button type="submit">Add manager</button>
+      </form>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="section-label">Posts</div>
+{% for item in posts %}
+  {{ post_card(item) }}
+{% else %}
+  <div class="empty">This page has not posted yet.</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Hangouts · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Hangouts</h1>
+  <p>Live video rooms, the way Google+ Hangouts worked: a few people, face to face.
+    Rooms run on Jitsi's free public service, so no account, relay or payment is involved.</p>
+</div>
+
+{% if needs_migration %}
+  <div class="flash error">Hangouts need the newest database migration. Run
+    <code>npm run db:remote</code> and reload.</div>
+{% else %}
+  {% if current_user %}
+    <section class="settings-card">
+      <h2>Start a hangout</h2>
+      <form method="post" action="{{ url_for('create_hangout') }}">
+        <label>Title
+          <input name="title" maxlength="{{ max_title }}" required placeholder="Listening party">
+        </label>
+        <label>Kind
+          <select name="kind">
+            <option value="hangout">Hangout - a room for a few people</option>
+            <option value="onair">Hangout On Air - public room, with a YouTube stream</option>
+          </select>
+        </label>
+        <label>YouTube stream (On Air only)
+          <input name="youtube_url" placeholder="https://www.youtube.com/watch?v=...">
+          <span class="muted">Optional. The video is embedded beside the room.</span>
+        </label>
+        <div class="actions"><button type="submit">Create room</button></div>
+      </form>
+    </section>
+  {% else %}
+    <div class="feed-cta">
+      <a class="button" href="{{ url_for('login', next=url_for('hangouts')) }}">Sign in</a>
+      <span class="muted">to start a hangout.</span>
+    </div>
+  {% endif %}
+
+  <div class="section-label">Live now</div>
+  {% for item in hangouts %}
+    <a class="admin-row hangout-row" href="{{ url_for('hangout', room=item.room) }}">
+      <span class="hangout-dot" aria-hidden="true"></span>
+      <div class="account-main">
+        <strong>{{ item.title }}</strong>
+        <small>Started by {{ item.owner_name }} · {{ 'On Air' if item.kind == 'onair' else 'Hangout' }}
+          · {{ item.created_at[:16] }}</small>
+      </div>
+      <div class="actions"><span class="button secondary">Join</span></div>
+    </a>
+  {% else %}
+    <div class="empty">No live hangouts. Start one above and invite people.</div>
+  {% endfor %}
+{% endif %}
+{% endblock %}

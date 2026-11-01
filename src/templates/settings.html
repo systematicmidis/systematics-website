@@ -56,6 +56,12 @@
       <a class="button" href="{{ url_for('profile_settings') }}">Edit profile</a>
       <a class="button" href="{{ url_for('profile', username=current_user.username) }}">My profile</a>
       <a class="button" href="{{ url_for('followers', username=current_user.username) }}">My followers</a>
+      {# Takeout, in the one form a static Worker can give it: a JSON file with
+         the profile, posts, comments, follows, circles and collections. #}
+      {% if gplus %}
+        <a class="button" href="{{ url_for('notification_settings') }}">Notification settings</a>
+      {% endif %}
+      <a class="button" href="{{ url_for('export_account') }}">Download my data</a>
       <a class="button" href="{{ url_for('logout') }}">Sign out</a>
     </div>
 

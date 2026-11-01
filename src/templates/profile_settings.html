@@ -8,10 +8,38 @@
     <label>Username<input value="{{ user.username }}" disabled></label>
     <label>User ID<input value="{{ user.user_id }}" disabled></label>
     <label>Display name<input name="display_name" maxlength="40" value="{{ user.display_name }}" required></label>
+    <label>Tagline
+      <input name="tagline" maxlength="{{ max_tagline }}" value="{{ user.tagline or '' }}"
+             placeholder="One line under your name, the way Google+ had it">
+      <small>Up to {{ max_tagline }} characters.</small>
+    </label>
+    <label>Nickname / also known as
+      <input name="nickname" maxlength="{{ max_nickname }}" value="{{ user.nickname or '' }}"
+             placeholder="Another name people might search for">
+    </label>
     <label>Bio
       <textarea name="bio" rows="4" maxlength="{{ max_bio_length }}" placeholder="Tell people about your Black MIDI projects...">{{ user.bio or '' }}</textarea>
-      <small>Up to {{ max_bio_length }} characters.</small>
+      <small>Up to {{ max_bio_length }} characters. **bold**, *italic*, @mentions and #tags work here.</small>
     </label>
+
+    <div class="setting-block">
+      <h2 class="setting-heading">About</h2>
+      <p class="setting-note">The fields Google+ put in a profile's About card. Every one
+        is optional and free text, so write what you like in them.</p>
+      <div class="about-grid">
+        <label>Work<input name="about_work" maxlength="{{ max_about }}" value="{{ user.about_work or '' }}"></label>
+        <label>Education<input name="about_education" maxlength="{{ max_about }}" value="{{ user.about_education or '' }}"></label>
+        <label>Places lived<input name="about_places" maxlength="{{ max_about }}" value="{{ user.about_places or '' }}"></label>
+        <label>Relationship<input name="about_relationship" maxlength="{{ max_about }}" value="{{ user.about_relationship or '' }}"></label>
+        <label>Birthday<input name="about_birthday" maxlength="{{ max_about }}" value="{{ user.about_birthday or '' }}"></label>
+        <label>Gender<input name="about_gender" maxlength="{{ max_about }}" value="{{ user.about_gender or '' }}"></label>
+        <label>Contact<input name="about_contact" maxlength="{{ max_about }}" value="{{ user.about_contact or '' }}"></label>
+      </div>
+      <label>Bragging rights
+        <textarea name="bragging_rights" rows="2" maxlength="{{ max_about }}"
+                  placeholder="The thing you are unreasonably proud of">{{ user.bragging_rights or '' }}</textarea>
+      </label>
+    </div>
 
     <div class="setting-block">
       <h2 class="setting-heading">Social links</h2>
@@ -58,6 +86,13 @@
       <label>New banner
         <input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp">
         <small>Stretched across the top of your profile. Wide images (around 4:1) look best. Up to 1.7 MB.</small>
+      </label>
+      <label>Banner crop
+        <select name="cover_position">
+          <option value="top" {% if user.cover_position == 'top' %}selected{% endif %}>Show the top</option>
+          <option value="center" {% if not user.cover_position or user.cover_position == 'center' %}selected{% endif %}>Show the middle</option>
+          <option value="bottom" {% if user.cover_position == 'bottom' %}selected{% endif %}>Show the bottom</option>
+        </select>
       </label>
       {% if user.banner %}
         <label class="checkbox"><input type="checkbox" name="remove_banner" value="1"> Remove my banner</label>

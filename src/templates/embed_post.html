@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ post.title }}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="embed-body">
+  <article class="post-card full-post embed-post">
+    <div class="post-head">
+      {% if post.page_name %}
+        {% if post.page_avatar %}
+          <img class="avatar avatar-img" src="{{ url_for('uploads', filename=post.page_avatar) }}" alt="">
+        {% else %}
+          <div class="avatar">{{ post.page_name[:1]|upper }}</div>
+        {% endif %}
+        <div class="post-author">
+          <strong>{{ post.page_name }}</strong>
+          <span>Page · <a class="post-stamp" href="{{ post_url(post) }}" target="_blank" rel="noopener">{{ post.created_at[:16] }} UTC</a></span>
+        </div>
+      {% elif post.author_username %}
+        {% if post.author_picture %}
+          <img class="avatar avatar-img" src="{{ url_for('uploads', filename=post.author_picture) }}" alt="">
+        {% else %}
+          <div class="avatar">{{ post.author_display_name[:1]|upper }}</div>
+        {% endif %}
+        <div class="post-author">
+          <strong>{{ post.author_display_name }}</strong>
+          <span><a class="post-stamp" href="{{ post_url(post) }}" target="_blank" rel="noopener">{{ post.created_at[:16] }} UTC</a></span>
+        </div>
+      {% else %}
+        <div class="avatar site-avatar">BM</div>
+        <div class="post-author">
+          <strong>Systematics Black Midi site</strong>
+          <span><a class="post-stamp" href="{{ post_url(post) }}" target="_blank" rel="noopener">{{ post.created_at[:16] }}</a></span>
+        </div>
+      {% endif %}
+    </div>
+    <div class="post-body">
+      <h1>{{ post.title }}</h1>
+      {% if post.content %}
+        <div class="post-content">{{ post.content|linkify(created_at=post.created_at) }}</div>
+      {% endif %}
+      {% if images %}
+        <div class="post-gallery">
+          {% for image in images %}
+            <a class="gallery-item" href="{{ url_for('uploads', filename=image.filename) }}" target="_blank" rel="noopener">
+              <img src="{{ url_for('uploads', filename=image.filename) }}" alt="" loading="lazy">
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% if embed %}
+        <div class="media-embed media-{{ embed.kind }}">
+          <iframe src="{{ embed.src }}" loading="lazy" allowfullscreen title="Embedded media"></iframe>
+        </div>
+      {% endif %}
+    </div>
+    <div class="embed-foot">
+      <a href="{{ post_url(post) }}" target="_blank" rel="noopener">Open on Systematics Black Midi →</a>
+    </div>
+  </article>
+</body>
+</html>

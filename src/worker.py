@@ -176,6 +176,75 @@ POST_CATEGORY_LABELS = {
     "systematics": "Systematics posts",
 }
 
+# Google+ revival --------------------------------------------------------------
+# The product this site is modelled on had more than one public stream: a post
+# could be shared with the world, with one circle, or with nobody but its author,
+# and it could live in a collection, a community or an event as well as on a
+# profile. These are the limits those screens use, kept in one place so a form
+# and the route that reads it cannot disagree.
+POST_AUDIENCES = ("public", "circles", "private")
+AUDIENCE_LABELS = {
+    "public": "Public",
+    "circles": "A circle",
+    "private": "Only me",
+}
+MAX_TAGLINE_LENGTH = 100
+MAX_NICKNAME_LENGTH = 40
+MAX_ABOUT_LENGTH = 300
+MAX_CIRCLE_NAME = 40
+MAX_CIRCLE_MEMBERS = 500
+MAX_COLLECTION_NAME = 40
+MAX_COLLECTION_DESCRIPTION = 200
+MAX_COMMUNITY_NAME = 60
+MAX_COMMUNITY_DESCRIPTION = 500
+MAX_EVENT_TITLE = 100
+MAX_EVENT_DESCRIPTION = 2000
+MAX_EVENT_LOCATION = 120
+# Four images is what fits in one D1 request body inside the Free plan's CPU
+# budget; each is capped at MAX_IMAGE_BYTES, so a post stays well under the 4 MB
+# request backstop.
+MAX_POST_IMAGES = 4
+MAX_SHARE_BODY = 1000
+MAX_REPORT_REASON = 500
+MAX_PEOPLE_TAGGED = 10
+# How many posts one page of every stream holds. Google+ loaded more as you
+# scrolled; the page carries the same cursor (?before=<post id>) that the
+# infinite-scroll script asks for, and the link underneath works without it.
+FEED_PAGE_SIZE = 20
+# Notifications pile up faster than anything else on a social site, so the page
+# reads the newest slice and the rail only ever counts unread ones.
+NOTIFICATION_PAGE_SIZE = 60
+NOTIFICATION_KINDS = (
+    "like", "comment", "reply", "mention", "follow", "share",
+    "comment_like", "tag",
+)
+NOTIFICATION_LABELS = {
+    "like": "Somebody +1s my posts",
+    "comment": "Somebody comments on my posts",
+    "reply": "Somebody replies to my comments",
+    "mention": "Somebody @mentions me",
+    "follow": "Somebody follows me",
+    "share": "Somebody reshares my posts",
+    "comment_like": "Somebody +1s my comments",
+    "tag": "Somebody tags me in a post",
+}
+# The rest of the G+ surfaces, added by migration 0017.
+MAX_PAGE_NAME = 60
+MAX_PAGE_TAGLINE = 120
+MAX_PAGE_ABOUT = 2000
+MAX_ALBUM_NAME = 40
+MAX_ALBUM_DESCRIPTION = 200
+MAX_SPARK_NAME = 50
+MAX_SPARK_DESCRIPTION = 400
+MAX_SPARK_NOTE = 200
+MAX_HANGOUT_TITLE = 100
+MAX_EMAIL = 120
+# Emails are queued and flushed in batches so a Worker request never waits on a
+# mail provider.
+EMAIL_BATCH_SIZE = 20
+DEFAULT_EMAIL_API_URL = "https://api.resend.com/emails"
+
+
 # Followers ------------------------------------------------------------------
 # One row per relationship in ``follows``; the profile pages list them newest first.
 # The cap keeps a runaway account from turning a profile into an unbounded query.
@@ -521,6 +590,14 @@ def inject_globals():
         "unread_messages": (
             unread_messages(current_user()) if session.get("user_db_id") else 0
         ),
+        # The bell beside Messages, same reasoning.
+        "unread_notifications": (
+            unread_notifications(current_user())
+            if session.get("user_db_id") else 0
+        ),
+        # Templates that carry revival-only screens ask this instead of assuming
+        # migration 0016 has been applied.
+        "gplus": gplus_schema(),
     }
 
 
@@ -1609,17 +1686,86 @@ def can_manage_post(item):
 
 
 def may_view(item):
-    """Drafts are unlisted: their author and site owners can open them, else 404."""
-    return item["status"] == "published" or can_manage_post(item)
+    """Whether this viewer may open a post at all.
+
+    Drafts are unlisted: their author and site owners can open them, else 404.
+    A published post also has an audience now - public, one circle, or only its
+    author - and a block hides both people from each other entirely.
+    """
+    if item["status"] != "published" and not can_manage_post(item):
+        return False
+    if not gplus_schema():
+        return True
+    if can_manage_post(item):
+        return True
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else 0
+    if viewer_id and is_blocked(viewer_id, item.get("user_id")):
+        return False
+    audience = item.get("audience") or "public"
+    if audience == "public":
+        return True
+    if audience == "private":
+        return False
+    if audience == "circles" and viewer_id and item.get("circle_id"):
+        return bool(safe_first(
+            "SELECT 1 FROM circle_members WHERE circle_id=? AND user_id=?",
+            item["circle_id"], viewer_id,
+        ))
+    return False
 
 
-def fetch_posts(where="", params=(), limit=None):
+def fetch_posts(where="", params=(), limit=None, order="posts.created_at DESC"):
     """Post rows plus author, score, comment count and the viewer's own vote.
 
     The viewer id is bound first (0 for anonymous visitors, which matches no row),
     so ``params`` follows the WHERE clause placeholders.
+
+    Everything migration 0016 added is read *only* when that migration is
+    present. A database that has not had it applied yet still renders the feed,
+    which matters because the GitHub Action ships code and never migrations: a
+    deploy that lands first must degrade to the old feed instead of answering
+    every page with error 1101.
     """
     viewer = session.get("user_db_id") or 0
+    extra = []
+    extra_joins = ""
+    if gplus_schema():
+        extra.extend([
+            "(SELECT filename FROM post_images WHERE post_id=posts.id"
+            " ORDER BY position, id LIMIT 1) AS cover_image",
+            "(SELECT COUNT(*) FROM post_images WHERE post_id=posts.id) AS photo_count",
+            "(SELECT COUNT(*) FROM shares WHERE post_id=posts.id) AS share_count",
+            "shared.title AS shared_title",
+            "shared.content AS shared_content",
+            "shared.public_id AS shared_public_id",
+            "shared.category AS shared_category",
+            "shared_user.username AS shared_author_username",
+            "shared_user.display_name AS shared_author_name",
+            "shared_user.user_id AS shared_author_public_id",
+        ])
+        extra_joins += (
+            "\n        LEFT JOIN posts shared ON shared.id = posts.share_of"
+            "\n        LEFT JOIN users shared_user ON shared_user.id = shared.user_id"
+        )
+    else:
+        extra.extend([
+            "0 AS photo_count", "0 AS share_count",
+            "NULL AS shared_title", "NULL AS shared_content",
+            "NULL AS shared_public_id", "NULL AS shared_category",
+            "NULL AS shared_author_username", "NULL AS shared_author_name",
+            "NULL AS shared_author_public_id",
+        ])
+    if gplus2_schema():
+        extra.extend([
+            "pages.name AS page_name",
+            "pages.slug AS page_slug",
+            "pages.avatar AS page_avatar",
+        ])
+        extra_joins += "\n        LEFT JOIN pages ON pages.id = posts.page_id"
+    extra_sql = ""
+    if extra:
+        extra_sql = ",\n               " + ",\n               ".join(extra)
     sql = f"""
         SELECT posts.*,
                users.username AS author_username,
@@ -1633,12 +1779,12 @@ def fetch_posts(where="", params=(), limit=None):
                link_previews.description AS link_description,
                link_previews.image AS link_image,
                link_previews.site AS link_site,
-               users.deleted_at AS author_deleted
+               users.deleted_at AS author_deleted{extra_sql}
         FROM posts
         LEFT JOIN users ON users.id = posts.user_id
-        LEFT JOIN link_previews ON link_previews.url = posts.link_url
+        LEFT JOIN link_previews ON link_previews.url = posts.link_url{extra_joins}
         {where}
-        ORDER BY posts.created_at DESC
+        ORDER BY {order}
     """
     if limit:
         sql += f" LIMIT {int(limit)}"
@@ -1792,30 +1938,52 @@ def viewer_follow_state(user):
     }
 
 
-def category_counts():
-    """Published post totals per feed, for the home page tabs."""
+def category_counts(viewer_id=None):
+    """Published post totals per feed, for the home page tabs.
+
+    Counted through the viewer's own visibility rule, so a private or circle post
+    cannot be inferred from a tab's total.
+    """
     counts = {name: 0 for name in POST_CATEGORIES}
+    clause, params = visibility_sql(viewer_id)
     for row in query(
-        "SELECT category, COUNT(*) AS total FROM posts"
-        " WHERE status='published' GROUP BY category"
+        f"SELECT posts.category, COUNT(*) AS total FROM posts"
+        f" WHERE {clause} GROUP BY posts.category",
+        *params,
     ):
         counts[row["category"]] = row["total"]
     counts["all"] = sum(counts.values())
     return counts
 
 
-def comment_threads(post_id):
-    """A post's comments as top-level rows, each carrying its ``replies`` list."""
-    rows = query("""
+def comment_threads(post_id, viewer_id=0):
+    """A post's comments as top-level rows, each carrying its ``replies`` list.
+
+    Each comment carries its own +1 score and the viewer's own vote, so a thread
+    renders every button correctly without asking the database again per row.
+    """
+    if gplus_schema():
+        score_columns = """
+               COALESCE((SELECT SUM(value) FROM comment_votes
+                          WHERE comment_id=comments.id), 0) AS score,
+               (SELECT value FROM comment_votes
+                 WHERE comment_id=comments.id AND user_id=?) AS my_vote
+        """
+        params = (viewer_id, post_id)
+    else:
+        score_columns = " 0 AS score, NULL AS my_vote"
+        params = (post_id,)
+    rows = query(f"""
         SELECT comments.*, users.id AS author_id,
                users.user_id AS public_user_id,
                users.username, users.display_name, users.profile_picture,
-               users.deleted_at AS author_deleted
+               users.deleted_at AS author_deleted,
+               {score_columns}
         FROM comments
         JOIN users ON users.id = comments.user_id
         WHERE comments.post_id=?
         ORDER BY comments.created_at ASC
-    """, post_id)
+    """, *params)
     by_id = {row["id"]: row for row in rows}
     threads = []
     for row in rows:
@@ -1827,6 +1995,963 @@ def comment_threads(post_id):
         else:  # a reply whose parent was deleted becomes its own thread
             threads.append(row)
     return threads
+
+
+# Google+ revival helpers ------------------------------------------------------
+# The support for everything migration 0016 added. Two rules run through it:
+#
+#   * nothing reads a table or a column that migration adds unless the migration
+#     is actually applied (gplus_schema() answers that once per request), because
+#     the GitHub Action ships code and never migrations - a deploy that lands
+#     before `npm run db:remote` must keep rendering the old site rather than
+#     answering every page with Cloudflare error 1101;
+#   * nothing here can fail a page. A notification that cannot be written is
+#     logged, not raised: the like it was about has already been saved.
+MENTION_RE = re.compile(r"(?<![\w@])@([A-Za-z0-9_]{3,24})")
+# The `&` in the lookbehind matters: html.escape() turns an apostrophe into
+# `&#x27;`, and without it the `#x27` inside that entity would be read as a tag
+# called "x27" and turned into a link - every contraction on the site would
+# sprout one. Entities are never tags.
+HASHTAG_RE = re.compile(r"(?<![\w#&])#([A-Za-z0-9_]{1,40})")
+# What a tagged handle is allowed to look like; the same rule users register
+# under, so a post cannot create a link that no profile can answer.
+MAX_FEED_TAG = 40
+
+
+def gplus_schema():
+    """True once migration 0016 is applied to the database.
+
+    Asked by probing the column every revival feature depends on, and cached on
+    ``g`` because a feed render asks several times.
+    """
+    if "gplus_schema" not in g:
+        try:
+            first("SELECT audience FROM posts LIMIT 1")
+            g.gplus_schema = True
+        except Exception:
+            g.gplus_schema = False
+    return g.gplus_schema
+
+
+def safe_query(sql, *params):
+    """query(), but a missing table returns [] instead of breaking the page."""
+    try:
+        return query(sql, *params)
+    except Exception as exc:
+        app.logger.warning("Optional query failed: %s", exc)
+        return []
+
+
+def safe_first(sql, *params):
+    """first(), but a missing table returns None instead of breaking the page."""
+    try:
+        return first(sql, *params)
+    except Exception as exc:
+        app.logger.warning("Optional lookup failed: %s", exc)
+        return None
+
+
+def safe_execute(sql, *params):
+    """execute(), but a missing table is logged instead of raised."""
+    try:
+        execute(sql, *params)
+        return True
+    except Exception as exc:
+        app.logger.warning("Optional write failed: %s", exc)
+        return False
+
+
+# Blocking --------------------------------------------------------------------
+
+def blocked_ids(user_id):
+    """Every account ``user_id`` blocks or is blocked by, in either direction.
+
+    G+ made a block mutual invisibility, and so does this: one query answers both
+    halves so a feed can exclude the lot at once.
+    """
+    if not user_id or not gplus_schema():
+        return set()
+    rows = safe_query(
+        "SELECT blocked_id AS other FROM blocks WHERE blocker_id=?"
+        " UNION SELECT blocker_id FROM blocks WHERE blocked_id=?",
+        user_id, user_id,
+    )
+    return {row["other"] for row in rows}
+
+
+def is_blocked(first_id, second_id):
+    """True when either account has blocked the other."""
+    if not first_id or not second_id or not gplus_schema():
+        return False
+    return bool(safe_first(
+        "SELECT 1 FROM blocks WHERE (blocker_id=? AND blocked_id=?)"
+        " OR (blocker_id=? AND blocked_id=?)",
+        first_id, second_id, second_id, first_id,
+    ))
+
+
+def viewer_blocks(user, other_id):
+    """Whether the signed-in viewer has blocked ``other_id`` (not the reverse)."""
+    return bool(user and other_id and safe_first(
+        "SELECT 1 FROM blocks WHERE blocker_id=? AND blocked_id=?",
+        user["id"], other_id,
+    ))
+
+
+# Who may see a post ------------------------------------------------------------
+
+def visibility_sql(viewer_id=None, alias="posts"):
+    """A WHERE clause for the posts one viewer is allowed to see.
+
+    A public post is public; a circle post is visible to its author and to the
+    members of that circle; "only me" is visible to nobody else. Blocked accounts
+    disappear in both directions. Drafts are never in a stream - they are opened
+    through may_view(), which is the only other gate.
+    """
+    if viewer_id is None:
+        viewer_id = session.get("user_db_id") or 0
+    if not gplus_schema():
+        return f"({alias}.status='published')", []
+    clause = (
+        f"({alias}.status='published' AND ({alias}.audience='public'"
+        f" OR {alias}.user_id=?"
+        f" OR ({alias}.audience='circles' AND {alias}.circle_id IN"
+        f" (SELECT circle_id FROM circle_members WHERE user_id=?))))"
+    )
+    params = [viewer_id, viewer_id]
+    if viewer_id:
+        clause += (
+            f" AND NOT EXISTS (SELECT 1 FROM blocks b"
+            f" WHERE (b.blocker_id=? AND b.blocked_id={alias}.user_id)"
+            f" OR (b.blocker_id={alias}.user_id AND b.blocked_id=?))"
+        )
+        params += [viewer_id, viewer_id]
+        # A muted account leaves the streams but not the site: their profile still
+        # opens, and so does a post opened by its own address. This is the softer
+        # control G+ put beside Block.
+        if gplus2_schema():
+            clause += (
+                f" AND NOT EXISTS (SELECT 1 FROM user_mutes um"
+                f" WHERE um.muter_id=? AND um.muted_id={alias}.user_id)"
+            )
+            params.append(viewer_id)
+    return clause, params
+
+
+def audience_label(item):
+    """How a post's audience is worded on its own page and in the editor."""
+    audience = (item or {}).get("audience") or "public"
+    if audience == "circles" and (item or {}).get("circle_name"):
+        return item["circle_name"]
+    return AUDIENCE_LABELS.get(audience, "Public")
+
+
+def circle_for_post(item):
+    """The circle a post was shared to, when there is one to name."""
+    if not item or not item.get("circle_id") or not gplus_schema():
+        return None
+    return safe_first("SELECT * FROM circles WHERE id=?", item["circle_id"])
+
+
+# Notifications -----------------------------------------------------------------
+
+def notify(user_id, kind, actor_id=None, post_id=None, comment_id=None):
+    """Tell ``user_id`` that ``actor_id`` did ``kind`` to something of theirs.
+
+    Skips the actor's own actions (nobody wants a bell for liking their own
+    post), skips blocked accounts, and skips a post the recipient has muted. A
+    write that fails is logged and lost - the action it describes is already
+    saved, and a notification is never worth failing a request over.
+    """
+    if not user_id or not gplus_schema():
+        return False
+    if actor_id and int(actor_id) == int(user_id):
+        return False
+    if actor_id and is_blocked(user_id, actor_id):
+        return False
+    if post_id:
+        muted = safe_first(
+            "SELECT 1 FROM post_mutes WHERE post_id=? AND user_id=?",
+            post_id, user_id,
+        )
+        if muted:
+            return False
+    # A per-kind switch (migration 0017) and, if the account asked for it, one
+    # line in the email outbox. Both are read at notify time, so turning a kind
+    # off stops the next one rather than hiding a row that already exists.
+    recipient = None
+    if gplus2_schema():
+        recipient = safe_first("SELECT * FROM users WHERE id=?", user_id)
+        if recipient and not notification_prefs(recipient).get(kind, True):
+            return False
+    inserted = safe_execute(
+        "INSERT INTO notifications (user_id, kind, actor_id, post_id, comment_id)"
+        " VALUES (?, ?, ?, ?, ?)",
+        user_id, kind, actor_id, post_id, comment_id,
+    )
+    if inserted and recipient is not None and actor_id:
+        actor = safe_first(
+            "SELECT display_name, username FROM users WHERE id=?", actor_id
+        )
+        who = (actor or {}).get("display_name") or "Somebody"
+        sentence = {
+            "like": f"{who} +1'd your post.",
+            "comment": f"{who} commented on your post.",
+            "reply": f"{who} replied to your comment.",
+            "mention": f"{who} mentioned you.",
+            "follow": f"{who} started following you.",
+            "share": f"{who} shared your post.",
+            "comment_like": f"{who} +1'd your comment.",
+            "tag": f"{who} tagged you in a post.",
+        }.get(kind, f"{who} did something on your account.")
+        queue_email(
+            recipient, kind, f"{who} on Systematics Black MIDI",
+            sentence + "\n\nOpen the site to see it: https://systematics-bm.systematic-midis.workers.dev/notifications",
+        )
+    return inserted
+
+
+def unread_notifications(user):
+    """How many of ``user``'s notifications are unread, for the rail badge."""
+    if not user or not gplus_schema():
+        return 0
+    row = safe_first(
+        "SELECT COUNT(*) AS total FROM notifications"
+        " WHERE user_id=? AND read_at IS NULL",
+        user["id"],
+    )
+    return int(row["total"]) if row else 0
+
+
+def notification_rows(user_id, limit=NOTIFICATION_PAGE_SIZE):
+    """The newest notifications with everything needed to word one."""
+    if not user_id or not gplus_schema():
+        return []
+    rows = safe_query(f"""
+        SELECT notifications.*,
+               actor.username AS actor_username,
+               actor.display_name AS actor_display_name,
+               actor.profile_picture AS actor_picture,
+               actor.deleted_at AS actor_deleted,
+               posts.title AS post_title,
+               posts.public_id AS post_public_id,
+               posts.user_id AS post_user_id,
+               comments.content AS comment_content
+        FROM notifications
+        LEFT JOIN users actor ON actor.id = notifications.actor_id
+        LEFT JOIN posts ON posts.id = notifications.post_id
+        LEFT JOIN comments ON comments.id = notifications.comment_id
+        WHERE notifications.user_id=?
+        ORDER BY notifications.id DESC
+        LIMIT {int(limit)}
+    """, user_id)
+    return rows
+
+
+def notification_text(row):
+    """The sentence one notification shows, written from the reader's side."""
+    actor = row.get("actor_display_name") or "Somebody"
+    kind = row.get("kind")
+    if kind == "like":
+        return f"{actor} +1'd your post"
+    if kind == "comment":
+        return f"{actor} commented on your post"
+    if kind == "reply":
+        return f"{actor} replied to your comment"
+    if kind == "mention":
+        return f"{actor} mentioned you"
+    if kind == "follow":
+        return f"{actor} started following you"
+    if kind == "share":
+        return f"{actor} shared your post"
+    if kind == "comment_like":
+        return f"{actor} +1'd your comment"
+    if kind == "tag":
+        return f"{actor} tagged you in a post"
+    return f"{actor} did something on your post"
+
+
+def notification_url(row):
+    """Where a notification goes: the post, the comment, or the actor."""
+    if row.get("post_public_id"):
+        post_row = {"public_id": row["post_public_id"],
+                    "author_public_id": row.get("actor_public_id") or row.get("post_user_id")}
+        base = url_for("post", public_id=row["post_public_id"])
+        if row.get("comment_id"):
+            base += f"#comment-{row['comment_id']}"
+        return base
+    if row.get("actor_username"):
+        return url_for("profile", username=row["actor_username"])
+    return url_for("notifications")
+
+
+def notify_mentions(text, actor, post_id=None, comment_id=None):
+    """Tell every @handle mentioned in ``text``, once each.
+
+    Handles are looked up, so text that happens to contain an @ does not create a
+    notification for a name that does not exist.
+    """
+    if not text or not actor or not gplus_schema():
+        return
+    seen = set()
+    for match in MENTION_RE.finditer(text):
+        username = match.group(1)
+        if username.lower() in seen:
+            continue
+        seen.add(username.lower())
+        target = safe_first(
+            "SELECT id, username FROM users WHERE username=? COLLATE NOCASE",
+            username,
+        )
+        if target and target["id"] != actor["id"]:
+            notify(target["id"], "mention", actor["id"], post_id, comment_id)
+
+
+# Hashtags ----------------------------------------------------------------------
+
+def tags_in(text):
+    """Every #tag in a body, lowercased and de-duplicated, in first-use order."""
+    tags = []
+    seen = set()
+    for match in HASHTAG_RE.finditer(text or ""):
+        tag = match.group(1).lower()
+        if tag not in seen:
+            seen.add(tag)
+            tags.append(tag)
+    return tags[:20]
+
+
+def store_post_tags(post_id, content):
+    """Replace a post's stored tags with the ones its body now carries."""
+    if not gplus_schema():
+        return
+    safe_execute("DELETE FROM post_tags WHERE post_id=?", post_id)
+    for tag in tags_in(content):
+        safe_execute(
+            "INSERT OR IGNORE INTO post_tags (post_id, tag) VALUES (?, ?)",
+            post_id, tag,
+        )
+
+
+def top_tags(limit=12, days=90):
+    """The tags in most use lately, which is what the trending strip shows."""
+    if not gplus_schema():
+        return []
+    return safe_query(f"""
+        SELECT post_tags.tag, COUNT(*) AS uses
+        FROM post_tags JOIN posts ON posts.id = post_tags.post_id
+        WHERE posts.status='published'
+          AND posts.created_at >= datetime('now', '-{int(days)} days')
+        GROUP BY post_tags.tag
+        ORDER BY uses DESC, post_tags.tag
+        LIMIT {int(limit)}
+    """)
+
+
+# Circles -----------------------------------------------------------------------
+
+def circle_rows(user_id):
+    """An account's circles with how many people are in each."""
+    if not user_id or not gplus_schema():
+        return []
+    return safe_query("""
+        SELECT circles.*,
+               (SELECT COUNT(*) FROM circle_members
+                 WHERE circle_id=circles.id) AS member_count
+        FROM circles WHERE circles.user_id=?
+        ORDER BY circles.name COLLATE NOCASE
+    """, user_id)
+
+
+def circle_by_id(circle_id):
+    return safe_first("SELECT * FROM circles WHERE id=?", circle_id)
+
+
+def circle_member_rows(circle_id, limit=MAX_CIRCLE_MEMBERS):
+    if not gplus_schema():
+        return []
+    return safe_query(f"""
+        SELECT users.id, users.username, users.display_name, users.profile_picture,
+               users.bio, users.deleted_at
+        FROM circle_members JOIN users ON users.id = circle_members.user_id
+        WHERE circle_members.circle_id=?
+        ORDER BY circle_members.added_at DESC
+        LIMIT {int(limit)}
+    """, circle_id)
+
+
+def circle_of_author_for(viewer_id, author_id):
+    """Is ``author_id`` in one of the viewer's circles? (for the profile badge)"""
+    if not viewer_id or not author_id or not gplus_schema():
+        return None
+    return safe_first("""
+        SELECT circles.name FROM circles
+        JOIN circle_members ON circle_members.circle_id = circles.id
+        WHERE circles.user_id=? AND circle_members.user_id=?
+        ORDER BY circles.name LIMIT 1
+    """, viewer_id, author_id)
+
+
+# Collections --------------------------------------------------------------------
+
+def collection_rows(user_id, viewer_id=0):
+    """An account's collections, with the public post counts beside them."""
+    if not user_id or not gplus_schema():
+        return []
+    rows = safe_query("""
+        SELECT collections.*,
+               (SELECT COUNT(*) FROM posts
+                 WHERE posts.collection_id=collections.id
+                   AND posts.status='published') AS post_count
+        FROM collections WHERE collections.user_id=?
+        ORDER BY collections.name COLLATE NOCASE
+    """, user_id)
+    if user_id != viewer_id:
+        rows = [row for row in rows if row["post_count"]]
+    return rows
+
+
+def collection_by_id(collection_id):
+    return safe_first("SELECT * FROM collections WHERE id=?", collection_id)
+
+
+# Communities ---------------------------------------------------------------------
+
+def community_rows(viewer_id=0):
+    """Every community, newest first, with member and post counts."""
+    if not gplus_schema():
+        return []
+    return safe_query("""
+        SELECT communities.*,
+               users.username AS owner_username,
+               users.display_name AS owner_name,
+               (SELECT COUNT(*) FROM community_members
+                 WHERE community_id=communities.id) AS member_count,
+               (SELECT COUNT(*) FROM posts
+                 WHERE community_id=communities.id
+                   AND status='published') AS post_count,
+               (SELECT role FROM community_members
+                 WHERE community_id=communities.id AND user_id=?) AS my_role
+        FROM communities
+        JOIN users ON users.id = communities.owner_id
+        ORDER BY communities.created_at DESC, communities.id DESC
+    """, viewer_id)
+
+
+def communities_for(user_id):
+    """The communities an account belongs to, for the editor's picker."""
+    if not user_id or not gplus_schema():
+        return []
+    return safe_query("""
+        SELECT communities.*, community_members.role
+        FROM community_members
+        JOIN communities ON communities.id = community_members.community_id
+        WHERE community_members.user_id=?
+        ORDER BY communities.name COLLATE NOCASE
+    """, user_id)
+
+
+def community_by_slug(slug):
+    return safe_first("SELECT * FROM communities WHERE slug=? COLLATE NOCASE", slug)
+
+
+def community_membership(community_id, user_id):
+    if not community_id or not user_id or not gplus_schema():
+        return None
+    return safe_first(
+        "SELECT * FROM community_members WHERE community_id=? AND user_id=?",
+        community_id, user_id,
+    )
+
+
+# Events --------------------------------------------------------------------------
+
+def event_rows(limit=30):
+    if not gplus_schema():
+        return []
+    return safe_query(f"""
+        SELECT events.*, users.username AS owner_username,
+               users.display_name AS owner_name,
+               (SELECT COUNT(*) FROM event_attendees
+                 WHERE event_id=events.id AND status='going') AS going_count
+        FROM events JOIN users ON users.id = events.owner_id
+        ORDER BY events.starts_at ASC
+        LIMIT {int(limit)}
+    """)
+
+
+def event_by_id(event_id):
+    return safe_first("SELECT * FROM events WHERE id=?", event_id)
+
+
+def event_attendance(event_id, user_id):
+    if not event_id or not user_id or not gplus_schema():
+        return None
+    return safe_first(
+        "SELECT * FROM event_attendees WHERE event_id=? AND user_id=?",
+        event_id, user_id,
+    )
+
+
+# Photos and media ----------------------------------------------------------------
+
+def post_image_rows(post_id):
+    """A post's images in the order they were uploaded."""
+    if not post_id or not gplus_schema():
+        return []
+    return safe_query(
+        "SELECT * FROM post_images WHERE post_id=? ORDER BY position, id", post_id
+    )
+
+
+def post_people_rows(post_id):
+    if not post_id or not gplus_schema():
+        return []
+    return safe_query("""
+        SELECT users.id, users.username, users.display_name
+        FROM post_people JOIN users ON users.id = post_people.user_id
+        WHERE post_people.post_id=?
+    """, post_id)
+
+
+def photo_posts_of(user_id, tagged=False):
+    """Posts with photos by ``user_id`` - or, tagged, posts they appear in."""
+    if not gplus_schema():
+        return []
+    clause, params = visibility_sql(session.get("user_db_id") or 0)
+    if tagged:
+        where = (
+            f"{clause} AND posts.id IN (SELECT post_id FROM post_people WHERE user_id=?)"
+        )
+        params = params + [user_id]
+    else:
+        where = f"{clause} AND posts.user_id=? AND posts.id IN (SELECT post_id FROM post_images)"
+        params = params + [user_id]
+    return fetch_posts("WHERE " + where, tuple(params), order="posts.created_at DESC")
+
+
+YOUTUBE_RE = re.compile(
+    r"(?:youtube\.com/(?:watch\?[^\s#]*v=|shorts/|embed/)|youtu\.be/)([A-Za-z0-9_-]{6,20})",
+    re.IGNORECASE,
+)
+
+
+def embed_for(url):
+    """An inline player for a YouTube or SoundCloud link, or None.
+
+    G+ expanded a pasted video into a playable thing; this is the same idea for
+    the two services this site's posts actually use. Only a player is built from
+    a *known* host and an id-shaped value, never from the URL itself, so a link
+    cannot smuggle an arbitrary frame into a page.
+    """
+    if not url:
+        return None
+    match = YOUTUBE_RE.search(url)
+    if match:
+        return {"kind": "youtube", "src": f"https://www.youtube.com/embed/{match.group(1)}"}
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if host in ("soundcloud.com", "www.soundcloud.com", "m.soundcloud.com"):
+        from urllib.parse import quote
+        return {
+            "kind": "soundcloud",
+            "src": "https://w.soundcloud.com/player/?url="
+                   + quote(url, safe="") + "&color=%234285f4&visual=true",
+        }
+    return None
+
+
+# Reshares ------------------------------------------------------------------------
+
+def share_count(post_id):
+    if not gplus_schema():
+        return 0
+    row = safe_first("SELECT COUNT(*) AS total FROM shares WHERE post_id=?", post_id)
+    return int(row["total"]) if row else 0
+
+
+def shares_of(post_id):
+    if not gplus_schema():
+        return []
+    return safe_query("""
+        SELECT users.username, users.display_name, users.profile_picture,
+               shares.created_at, shares.post_id_created
+        FROM shares JOIN users ON users.id = shares.user_id
+        WHERE shares.post_id=?
+        ORDER BY shares.created_at DESC
+        LIMIT 50
+    """, post_id)
+
+
+def voters_of(post_id, value=1, limit=30):
+    """Who +1'd a post, for the "who liked this" list."""
+    if not gplus_schema():
+        return []
+    return safe_query(f"""
+        SELECT users.username, users.display_name, users.profile_picture,
+               post_votes.created_at
+        FROM post_votes JOIN users ON users.id = post_votes.user_id
+        WHERE post_votes.post_id=? AND post_votes.value=?
+        ORDER BY post_votes.created_at DESC LIMIT {int(limit)}
+    """, post_id, value)
+
+
+# The rest of Google+: pages, mutes, mail, albums, hangouts and sparks ----------
+
+def gplus2_schema():
+    """True once migration 0017 is applied (and 0016, which it builds on)."""
+    if "gplus2_schema" not in g:
+        if not gplus_schema():
+            g.gplus2_schema = False
+        else:
+            try:
+                first("SELECT 1 FROM pages LIMIT 1")
+                g.gplus2_schema = True
+            except Exception:
+                g.gplus2_schema = False
+    return g.gplus2_schema
+
+
+# Muting a person ---------------------------------------------------------------
+def muted_ids(user_id):
+    """Accounts ``user_id`` has muted. Muted posts leave the streams, not the site."""
+    if not user_id or not gplus2_schema():
+        return set()
+    return {row["muted_id"] for row in safe_query(
+        "SELECT muted_id FROM user_mutes WHERE muter_id=?", user_id
+    )}
+
+
+def is_muted(muter_id, muted_id):
+    if not muter_id or not muted_id or not gplus2_schema():
+        return False
+    return bool(safe_first(
+        "SELECT 1 FROM user_mutes WHERE muter_id=? AND muted_id=?",
+        muter_id, muted_id,
+    ))
+
+
+def muted_people(user_id):
+    """The accounts ``user_id`` mutes, for the settings page."""
+    if not user_id or not gplus2_schema():
+        return []
+    return safe_query("""
+        SELECT users.id, users.username, users.display_name, users.profile_picture
+        FROM user_mutes JOIN users ON users.id = user_mutes.muted_id
+        WHERE user_mutes.muter_id=?
+        ORDER BY users.display_name COLLATE NOCASE
+    """, user_id)
+
+
+# Notification preferences and email ---------------------------------------------
+def notification_prefs(user):
+    """The account's per-kind switches; a missing key means on."""
+    prefs = {kind: True for kind in NOTIFICATION_KINDS}
+    if not user or not gplus2_schema():
+        return prefs
+    raw = user.get("notification_prefs")
+    if not raw:
+        return prefs
+    try:
+        stored = json.loads(raw)
+    except (TypeError, ValueError):
+        return prefs
+    if isinstance(stored, dict):
+        for kind in NOTIFICATION_KINDS:
+            if kind in stored:
+                prefs[kind] = bool(stored[kind])
+    return prefs
+
+
+def email_config():
+    """Where queued mail is sent, from Worker variables/secrets.
+
+    A Resend-compatible endpoint is assumed (`POST {from,to,subject,text}` with a
+    bearer token). Nothing is sent until all three values exist, which is why the
+    site works - and shows "not configured" - with no mail provider at all.
+    """
+    try:
+        worker_env = env()
+    except Exception:
+        worker_env = None
+    def value(name, fallback=""):
+        configured = getattr(worker_env, name, None) if worker_env is not None else None
+        return (configured or os.environ.get(name) or fallback).strip()
+    return {
+        "url": value("EMAIL_API_URL", DEFAULT_EMAIL_API_URL),
+        "key": value("EMAIL_API_KEY"),
+        "from": value("EMAIL_FROM"),
+    }
+
+
+def email_configured():
+    cfg = email_config()
+    return bool(cfg["url"] and cfg["key"] and cfg["from"])
+
+
+def queue_email(recipient, kind, subject, body):
+    """Put one digest line in the outbox for an account that asked for email."""
+    if not gplus2_schema() or not recipient:
+        return False
+    address = (recipient.get("email") or "").strip()
+    if not address or not recipient.get("email_digest"):
+        return False
+    return safe_execute(
+        "INSERT INTO email_outbox (recipient_id, to_address, kind, subject, body)"
+        " VALUES (?, ?, ?, ?, ?)",
+        recipient["id"], address, kind, subject, body,
+    )
+
+
+def pending_email_count():
+    if not gplus2_schema():
+        return 0
+    row = safe_first(
+        "SELECT COUNT(*) AS total FROM email_outbox WHERE sent_at IS NULL"
+    )
+    return int(row["total"]) if row else 0
+
+
+def flush_emails(limit=EMAIL_BATCH_SIZE):
+    """Send the oldest queued emails; returns ``(sent, message)``.
+
+    Called from the admin panel, never from the request that caused a
+    notification: a mail provider can take seconds, and the Worker's CPU budget is
+    spent before that returns. A failure leaves the row pending with its error so
+    the admin can see what happened and try again.
+    """
+    cfg = email_config()
+    if not email_configured():
+        return 0, ("Email is not configured. Set EMAIL_API_KEY, EMAIL_FROM and "
+                   "(optionally) EMAIL_API_URL as Worker secrets/variables.")
+    if not gplus2_schema():
+        return 0, "Email needs migration 0017 applied to the database."
+    rows = safe_query(
+        "SELECT * FROM email_outbox WHERE sent_at IS NULL ORDER BY id LIMIT ?",
+        int(limit),
+    )
+    sent = 0
+    for row in rows:
+        init = {
+            "method": "POST",
+            "headers": {
+                "authorization": f"Bearer {cfg['key']}",
+                "content-type": "application/json",
+            },
+            "body": json.dumps({
+                "from": cfg["from"],
+                "to": [row["to_address"]],
+                "subject": row["subject"],
+                "text": row["body"],
+            }),
+        }
+        try:
+            response = run_sync(http_fetch()(cfg["url"], to_js(init)))
+            status = int(response.status)
+            if status < 400:
+                safe_execute(
+                    "UPDATE email_outbox SET sent_at=datetime('now'), error=NULL"
+                    " WHERE id=?", row["id"],
+                )
+                sent += 1
+            else:
+                safe_execute(
+                    "UPDATE email_outbox SET error=? WHERE id=?",
+                    f"provider answered HTTP {status}", row["id"],
+                )
+        except Exception as exc:
+            safe_execute(
+                "UPDATE email_outbox SET error=? WHERE id=?", str(exc)[:300], row["id"]
+            )
+    return sent, f"Sent {sent} of {len(rows)} queued email(s)." if rows else "Nothing queued."
+
+
+# Pages -------------------------------------------------------------------------
+def page_by_slug(slug):
+    if not gplus2_schema():
+        return None
+    return safe_first("SELECT * FROM pages WHERE slug=? COLLATE NOCASE", slug)
+
+
+def page_by_id(page_id):
+    if not gplus2_schema():
+        return None
+    return safe_first("SELECT * FROM pages WHERE id=?", page_id)
+
+
+def pages_for(user_id):
+    """Pages ``user_id`` may write as, for the composer's identity picker."""
+    if not user_id or not gplus2_schema():
+        return []
+    return safe_query("""
+        SELECT pages.* FROM pages
+        JOIN page_managers ON page_managers.page_id = pages.id
+        WHERE page_managers.user_id=?
+        ORDER BY pages.name COLLATE NOCASE
+    """, user_id)
+
+
+def page_managers_rows(page_id):
+    if not gplus2_schema():
+        return []
+    return safe_query("""
+        SELECT users.id, users.username, users.display_name, users.profile_picture,
+               page_managers.role
+        FROM page_managers JOIN users ON users.id = page_managers.user_id
+        WHERE page_managers.page_id=?
+        ORDER BY page_managers.added_at
+    """, page_id)
+
+
+def can_manage_page(page, user):
+    if not page or not user or not gplus2_schema():
+        return False
+    if page["owner_id"] == user["id"]:
+        return True
+    return bool(safe_first(
+        "SELECT 1 FROM page_managers WHERE page_id=? AND user_id=?",
+        page["id"], user["id"],
+    ))
+
+
+def page_rows(limit=50):
+    if not gplus2_schema():
+        return []
+    return safe_query(f"""
+        SELECT pages.*,
+               users.username AS owner_username,
+               (SELECT COUNT(*) FROM posts
+                 WHERE posts.page_id=pages.id AND posts.status='published') AS post_count
+        FROM pages JOIN users ON users.id = pages.owner_id
+        ORDER BY pages.name COLLATE NOCASE LIMIT {int(limit)}
+    """)
+
+
+def page_posts(page, viewer_id=None, limit=40):
+    clause, params = visibility_sql(viewer_id)
+    return fetch_posts(
+        f"WHERE {clause} AND posts.page_id=?",
+        tuple(params + [page["id"]]), order="posts.id DESC", limit=limit,
+    )
+
+
+# Albums -------------------------------------------------------------------------
+def albums_for(user_id, viewer_id=0):
+    """An account's albums with their post counts; empty ones are private."""
+    if not user_id or not gplus2_schema():
+        return []
+    rows = safe_query("""
+        SELECT albums.*,
+               (SELECT COUNT(*) FROM album_posts WHERE album_id=albums.id) AS post_count
+        FROM albums WHERE albums.user_id=?
+        ORDER BY albums.name COLLATE NOCASE
+    """, user_id)
+    if user_id != viewer_id:
+        rows = [row for row in rows if row["post_count"]]
+    return rows
+
+
+def album_by_id(album_id):
+    if not gplus2_schema():
+        return None
+    return safe_first("SELECT * FROM albums WHERE id=?", album_id)
+
+
+def album_posts(album_id):
+    clause, params = visibility_sql()
+    return fetch_posts(
+        f"WHERE {clause} AND posts.id IN"
+        f" (SELECT post_id FROM album_posts WHERE album_id=?)",
+        tuple(params + [album_id]), order="posts.id DESC", limit=60,
+    )
+
+
+def post_album_rows(post_id):
+    if not gplus2_schema():
+        return []
+    return safe_query("""
+        SELECT albums.* FROM albums
+        JOIN album_posts ON album_posts.album_id = albums.id
+        WHERE album_posts.post_id=? ORDER BY albums.name COLLATE NOCASE
+    """, post_id)
+
+
+# Hangouts ------------------------------------------------------------------------
+def hangout_rows(limit=30):
+    if not gplus2_schema():
+        return []
+    return safe_query(f"""
+        SELECT hangouts.*, users.username AS owner_username,
+               users.display_name AS owner_name
+        FROM hangouts JOIN users ON users.id = hangouts.owner_id
+        WHERE hangouts.ended_at IS NULL
+        ORDER BY hangouts.created_at DESC, hangouts.id DESC LIMIT {int(limit)}
+    """)
+
+
+def hangout_by_room(room):
+    if not gplus2_schema():
+        return None
+    return safe_first("SELECT * FROM hangouts WHERE room=?", room)
+
+
+def hangout_by_id(hangout_id):
+    if not gplus2_schema():
+        return None
+    return safe_first("SELECT * FROM hangouts WHERE id=?", hangout_id)
+
+
+def jitsi_room_name():
+    """A room nobody can guess, on Jitsi's free public service."""
+    return "SystematicsBM-" + secrets.token_hex(8)
+
+
+# Sparks --------------------------------------------------------------------------
+def spark_rows(limit=50):
+    if not gplus2_schema():
+        return []
+    return safe_query(f"""
+        SELECT sparks.*,
+               (SELECT COUNT(*) FROM spark_links WHERE spark_id=sparks.id)
+                   AS link_count
+        FROM sparks ORDER BY sparks.name COLLATE NOCASE LIMIT {int(limit)}
+    """)
+
+
+def spark_by_slug(slug):
+    if not gplus2_schema():
+        return None
+    return safe_first("SELECT * FROM sparks WHERE slug=? COLLATE NOCASE", slug)
+
+
+def spark_link_rows(spark_id, limit=60):
+    if not gplus2_schema():
+        return []
+    return safe_query(f"""
+        SELECT spark_links.*,
+               users.username AS added_by_username,
+               users.display_name AS added_by_name,
+               link_previews.title, link_previews.description,
+               link_previews.image, link_previews.site
+        FROM spark_links
+        LEFT JOIN users ON users.id = spark_links.added_by
+        LEFT JOIN link_previews ON link_previews.url = spark_links.url
+        WHERE spark_links.spark_id=?
+        ORDER BY spark_links.id DESC LIMIT {int(limit)}
+    """, spark_id)
+
+
+def youtube_id(url):
+    """The id of a YouTube video, live page, short or embed, or None."""
+    match = re.search(
+        r"(?:youtube\.com/(?:watch\?[^\s#]*v=|shorts/|embed/|live/)|youtu\.be/)"
+        r"([A-Za-z0-9_-]{6,20})",
+        url or "", re.IGNORECASE,
+    )
+    return match.group(1) if match else None
 
 
 # Link cards -----------------------------------------------------------------
@@ -1923,6 +3048,45 @@ def log_stamp(created_at):
     )
 
 
+BOLD_IN_TEXT_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", re.DOTALL)
+STRIKE_IN_TEXT_RE = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~", re.DOTALL)
+ITALIC_IN_TEXT_RE = re.compile(
+    r"(?<![\w*])\*(?=\S)([^*\n]+?)(?<=\S)\*(?![\w*])", re.DOTALL
+)
+
+
+def decorate_text(escaped):
+    """Turn **bold**, ~~strike~~, *italic*, @mentions and #tags into markup.
+
+    Runs *after* escaping and only on plain runs of text, so the input is already
+    someone's words rather than HTML. Every address it writes is built with
+    url_for from a value the regex has already constrained (a handle shaped like
+    a real username, a tag of letters, digits or underscores), which is what
+    keeps a post from inventing a link to somewhere else.
+    """
+    escaped = BOLD_IN_TEXT_RE.sub(r"<strong>\1</strong>", escaped)
+    escaped = STRIKE_IN_TEXT_RE.sub(r"<del>\1</del>", escaped)
+    escaped = ITALIC_IN_TEXT_RE.sub(r"<em>\1</em>", escaped)
+
+    def mention(match):
+        username = match.group(1)
+        return (
+            f'<a class="mention" href="{url_for("profile", username=username)}">'
+            f'@{username}</a>'
+        )
+
+    def hashtag(match):
+        tag = match.group(1)
+        return (
+            f'<a class="hashtag" href="{url_for("tag", tag=tag.lower())}">'
+            f'#{tag}</a>'
+        )
+
+    escaped = MENTION_RE.sub(mention, escaped)
+    escaped = HASHTAG_RE.sub(hashtag, escaped)
+    return escaped
+
+
 def escaped_text(chunk, stamp, excerpt=False):
     """Escape one run of user text, resolving the tokens in it.
 
@@ -1936,6 +3100,10 @@ def escaped_text(chunk, stamp, excerpt=False):
     how much of the commit log a card shows.
     """
     escaped = html.escape(chunk)
+    # **bold**, *italic*, ~~strike~~, @mentions and #tags are markup a person
+    # types, so they are resolved here, after escaping and only over text that
+    # is not already a link (linkify() splits those out before calling this).
+    escaped = decorate_text(escaped)
     if stamp is not None:
         # The whole "[DATE] at [LOCAL USER TIME ZONE]" phrase as one unit first:
         # the "at" between the two tokens is part of that phrase, so replacing
@@ -2558,18 +3726,27 @@ def static_files(path):
 
 @app.route("/")
 def home():
-    """The feed. ``?category=`` filters by feed, ``?feed=following`` by who you follow."""
+    """The stream.
+
+    ``?category=`` keeps the two feeds apart, ``?feed=following`` is the people
+    you follow, ``?feed=incoming`` the people who follow you (Google+'s
+    "Incoming"), and ``?feed=circle&circle=<id>`` one of your circles. A signed-in
+    visitor sees their own drafts nowhere - drafts are opened by URL - but does
+    see circle posts addressed to a circle they are in.
+    """
     feed = request.args.get("feed", "")
     category = request.args.get("category", "")
     if category not in POST_CATEGORIES:
         category = ""
-    where = "WHERE posts.status='published'"
-    params = []
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else 0
+    clause, params = visibility_sql(viewer_id)
+    where = "WHERE " + clause
+    active_circle = None
     if feed == "following":
         # The Following stream and the per-category tabs are alternatives, not
         # combinable filters - Google+ had one stream per circle, not a grid.
         category = ""
-        viewer_id = session.get("user_db_id")
         if not viewer_id:
             flash("Sign in to see posts from the people you follow.", "error")
             return redirect(url_for("login", next=url_for("home", feed="following")))
@@ -2579,21 +3756,73 @@ def home():
             " WHERE follower_id=? UNION SELECT ?)"
         )
         params.extend([viewer_id, viewer_id])
+    elif feed == "incoming":
+        category = ""
+        if not viewer_id:
+            flash("Sign in to see the people who follow you.", "error")
+            return redirect(url_for("login", next=url_for("home", feed="incoming")))
+        # Incoming: their posts, from accounts that follow you and that you do
+        # not follow back. G+'s cheapest way to notice a new account.
+        where += (
+            " AND posts.user_id IN (SELECT follower_id FROM follows WHERE followed_id=?)"
+            " AND posts.user_id NOT IN (SELECT followed_id FROM follows WHERE follower_id=?)"
+        )
+        params.extend([viewer_id, viewer_id])
+    elif feed == "circle":
+        category = ""
+        circle_arg = request.args.get("circle", "")
+        active_circle = circle_by_id(circle_arg) if circle_arg.isdigit() else None
+        if not viewer_id or not active_circle or active_circle["user_id"] != viewer_id:
+            flash("That circle is not one of yours.", "error")
+            return redirect(url_for("home"))
+        where += (
+            " AND posts.user_id IN (SELECT user_id FROM circle_members"
+            " WHERE circle_id=?)"
+        )
+        params.append(active_circle["id"])
     else:
         feed = ""
         if category:
             where += " AND posts.category=?"
             params.append(category)
-    viewer = current_user()
+
+    # Infinite scroll / "Older posts": the cursor is the id of the last post on
+    # the page, so a new post arriving mid-scroll cannot make the reader see one
+    # twice or skip one.
+    before = request.args.get("before", "")
+    if before.isdigit():
+        where += " AND posts.id < ?"
+        params.append(int(before))
+    rows = fetch_posts(where, tuple(params), limit=FEED_PAGE_SIZE + 1,
+                       order="posts.id DESC")
+    has_more = len(rows) > FEED_PAGE_SIZE
+    posts = rows[:FEED_PAGE_SIZE]
+    next_before = posts[-1]["id"] if has_more and posts else None
+    next_url = None
+    if has_more and next_before:
+        args = {"before": next_before}
+        if category:
+            args["category"] = category
+        if feed:
+            args["feed"] = feed
+        if active_circle:
+            args["circle"] = active_circle["id"]
+        next_url = url_for("home", **args)
     return render_template(
         "index.html",
-        posts=fetch_posts(where, tuple(params)),
+        posts=posts,
         category=category,
         feed=feed,
+        active_circle=active_circle,
+        my_circles=circle_rows(viewer_id),
+        has_more=has_more,
+        next_before=next_before,
+        next_url=next_url,
+        tags=top_tags(),
         # How many people you follow, shown on the Following tab.
         following_total=follow_counts(viewer["id"])[1] if viewer else 0,
         category_labels=POST_CATEGORY_LABELS,
-        counts=category_counts(),
+        counts=category_counts(viewer_id),
     )
 
 
@@ -2666,6 +3895,8 @@ def render_post_page(item):
     canonical = canonical_post_path(item)
     if not may_view(item):
         abort(404)
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else 0
 
     if request.method == "POST":
         # The account row itself, not the session id: this route writes a comment
@@ -2697,25 +3928,61 @@ def render_post_page(item):
             flash("Please enter a comment.", "error")
         elif len(content) > 2000:
             flash("Your comment is too long.", "error")
+        elif item.get("locked"):
+            flash("The author has locked this post. No new comments can be added.", "error")
         else:
             execute(
                 "INSERT INTO comments (post_id, user_id, content, parent_id) VALUES (?, ?, ?, ?)",
                 item["id"], commenter["id"], content, parent["id"] if parent else None,
             )
+            created = first("SELECT last_insert_rowid() AS id")
+            new_id = created["id"] if created else None
+            # Tell the people the comment is about: the post's author for a new
+            # comment, the comment's author for a reply. A reply to your own
+            # comment notifies nobody (notify() drops self-actions).
+            if item.get("user_id"):
+                notify(
+                    item["user_id"], "reply" if parent else "comment",
+                    commenter["id"], item["id"], new_id,
+                )
+            if parent:
+                parent_row = first("SELECT user_id FROM comments WHERE id=?", parent["id"])
+                if parent_row:
+                    notify(parent_row["user_id"], "reply", commenter["id"],
+                           item["id"], new_id)
+            notify_mentions(content, commenter, item["id"], new_id)
             return redirect(canonical + anchor)
 
     return render_template(
         "post.html",
         post=item,
-        comments=comment_threads(item["id"]),
+        comments=comment_threads(item["id"], viewer_id),
         can_manage=can_manage_post(item),
+        viewer_id=viewer_id,
+        images=post_image_rows(item["id"]),
+        people=post_people_rows(item["id"]),
+        embed=embed_for(item.get("link_url")),
+        shares=shares_of(item["id"]),
+        voters=voters_of(item["id"], 1),
+        share_target=(
+            fetch_posts("WHERE posts.id=?", (item["share_of"],))[0]
+            if item.get("share_of") and gplus_schema() else None
+        ),
+        audience_name=audience_label({**item, "circle_name":
+                                      (circle_for_post(item) or {}).get("name")}),
+        my_circle=circle_of_author_for(viewer_id, item.get("user_id")),
+        albums=albums_for(item.get("user_id"), viewer_id),
+        post_albums={row["id"] for row in post_album_rows(item["id"])},
+        embed_url=url_for("embed_post", post_id=item["id"], _external=True),
     )
 
 
 @app.post("/post/<int:post_id>/vote")
 def vote_post(post_id):
     """Like (+1) or dislike (-1) a post; repeating the same vote clears it."""
-    item = first("SELECT id FROM posts WHERE id=? AND status='published'", post_id)
+    item = first(
+        "SELECT id, user_id FROM posts WHERE id=? AND status='published'", post_id
+    )
     if not item:
         abort(404)
     # The account row rather than the session id, for the same reason a comment
@@ -2742,6 +4009,10 @@ def vote_post(post_id):
                ON CONFLICT(post_id, user_id) DO UPDATE SET value=excluded.value""",
             post_id, user_id, value,
         )
+        # Only a +1 rings the bell; a downvote was G+'s "dislike" and stayed
+        # private to the person who cast it.
+        if value == 1:
+            notify(item["user_id"], "like", user_id, post_id)
     return redirect(request.referrer or post_path(post_id))
 
 
@@ -2767,6 +4038,17 @@ def new_post():
         can_choose_status=is_admin(),
         can_choose_category=is_admin(),
         default_category=post_category_for(user["username"]),
+        circles=circle_rows(user["id"]),
+        collections=collection_rows(user["id"], user["id"]),
+        my_communities=communities_for(user["id"]),
+        my_events=safe_query(
+            "SELECT * FROM events WHERE owner_id=? ORDER BY starts_at", user["id"]
+        ),
+        my_pages=pages_for(user["id"]),
+        max_images=MAX_POST_IMAGES,
+        images=[],
+        tagged_value="",
+        audience_labels=AUDIENCE_LABELS,
     )
 
 
@@ -2789,6 +4071,7 @@ def edit_post(post_id):
         if target:
             flash("Post updated.", "success")
             return redirect(target)
+    images = post_image_rows(item["id"])
     return render_template(
         "post_editor.html",
         post=item,
@@ -2796,6 +4079,19 @@ def edit_post(post_id):
         can_choose_status=is_admin(),
         can_choose_category=is_admin(),
         default_category=item["category"],
+        circles=circle_rows(current_user()["id"]),
+        collections=collection_rows(current_user()["id"], current_user()["id"]),
+        my_communities=communities_for(current_user()["id"]),
+        my_events=safe_query(
+            "SELECT * FROM events WHERE owner_id=? ORDER BY starts_at",
+            current_user()["id"],
+        ),
+        my_pages=pages_for(current_user()["id"]),
+        max_images=MAX_POST_IMAGES,
+        images=images,
+        tagged_value=" ".join("@" + person["username"]
+                              for person in post_people_rows(item["id"])),
+        audience_labels=AUDIENCE_LABELS,
     )
 
 
@@ -2808,6 +4104,22 @@ def delete_post(post_id):
     if not can_manage_post(item):
         flash("You can only delete your own posts.", "error")
         return redirect(post_path(post_id))
+    # Take the pictures and the revival-only rows with the post: `uploads` holds
+    # the bytes, and nothing else will ever reference them again.
+    for image in post_image_rows(post_id):
+        delete_upload(image["filename"])
+    if gplus_schema():
+        for table, column in (
+            ("post_images", "post_id"), ("post_tags", "post_id"),
+            ("post_people", "post_id"), ("shares", "post_id"),
+            ("post_mutes", "post_id"), ("notifications", "post_id"),
+        ):
+            safe_execute(f"DELETE FROM {table} WHERE {column}=?", post_id)
+        safe_execute(
+            "DELETE FROM comment_votes WHERE comment_id IN"
+            " (SELECT id FROM comments WHERE post_id=?)", post_id,
+        )
+        safe_execute("DELETE FROM shares WHERE post_id_created=?", post_id)
     execute("DELETE FROM post_votes WHERE post_id=?", post_id)
     execute("DELETE FROM comments WHERE post_id=?", post_id)
     execute("DELETE FROM posts WHERE id=?", post_id)
@@ -2815,9 +4127,54 @@ def delete_post(post_id):
     return redirect(url_for("admin") if is_admin() else url_for("home"))
 
 
+def tagged_people(value, author_id):
+    """Accounts named in the editor's "tag people" box, by handle."""
+    found = []
+    seen = {author_id}
+    for raw in re.split(r"[,\s]+", value or ""):
+        name = raw.strip().lstrip("@")
+        if not name or len(found) >= MAX_PEOPLE_TAGGED:
+            continue
+        row = first(
+            "SELECT id, username FROM users WHERE username=? COLLATE NOCASE", name
+        )
+        if row and row["id"] not in seen:
+            seen.add(row["id"])
+            found.append(row)
+    return found
+
+
+def post_audience_from_form(user):
+    """Validate the editor's audience, returning (audience, circle, error)."""
+    audience = request.form.get("audience", "public")
+    if audience not in POST_AUDIENCES or not gplus_schema():
+        return "public", None, None
+    circle = None
+    if audience == "circles":
+        circle_id = request.form.get("circle_id", "")
+        circle = circle_by_id(circle_id) if circle_id.isdigit() else None
+        if not circle or circle["user_id"] != user["id"]:
+            return audience, None, "Pick one of your own circles to share with."
+    return audience, circle, None
+
+
 def save_post(item=None):
-    """Create or update a post from the editor form; returns where to go next."""
+    """Create or update a post from the editor form; returns where to go next.
+
+    Everything migration 0016 added is validated here rather than trusted: a
+    circle, collection, community, event and set of tagged people all have to
+    belong to the person posting, because the ids arrive in a form.
+    """
     user = current_user()
+    # Posting as a Page (migration 0017). The account stays the author of record
+    # for moderation and for the post's own URL; the page is what readers see.
+    page = None
+    page_id = request.form.get("page_id", "")
+    if page_id.isdigit() and gplus2_schema():
+        page = page_by_id(int(page_id))
+        if not can_manage_page(page, user):
+            flash("Pick a page you manage, or post as yourself.", "error")
+            return None
     title = request.form.get("title", "").strip()
     content = request.form.get("content", "").strip()
     if not title or not content:
@@ -2832,25 +4189,148 @@ def save_post(item=None):
     category = post_category_for(user["username"])
     if is_admin() and request.form.get("category") in POST_CATEGORIES:
         category = request.form["category"]
+
+    audience, circle, audience_error = post_audience_from_form(user)
+    if audience_error:
+        flash(audience_error, "error")
+        return None
+    collection = None
+    collection_id = request.form.get("collection_id", "")
+    if collection_id.isdigit() and gplus_schema():
+        collection = collection_by_id(collection_id)
+        if collection and collection["user_id"] != user["id"]:
+            collection = None
+    community = None
+    community_id = request.form.get("community_id", "")
+    if community_id.isdigit() and gplus_schema():
+        community = safe_first("SELECT * FROM communities WHERE id=?", int(community_id))
+        if community:
+            member = community_membership(community["id"], user["id"])
+            if not member and community["owner_id"] != user["id"]:
+                flash("Join that community before posting in it.", "error")
+                return None
+    event = None
+    event_id = request.form.get("event_id", "")
+    if event_id.isdigit() and gplus_schema():
+        event = event_by_id(int(event_id))
+        if event and event["owner_id"] != user["id"]:
+            event = None
+    warning = (request.form.get("content_warning", "") or "").strip()[:120]
+    tagged = tagged_people(request.form.get("tag_people", ""), user["id"])
+
+    # Photos are saved before the post so a refused upload cannot leave a post
+    # behind that the person has to delete. Existing images count toward the cap
+    # when editing; anything over it is refused rather than silently dropped.
+    existing_images = post_image_rows(item["id"]) if item and gplus_schema() else []
+    removals = {value for value in request.form.getlist("remove_image") if value.isdigit()}
+    kept = [image for image in existing_images if str(image["id"]) not in removals]
+    new_files = [f for f in request.files.getlist("images") if f and f.filename]
+    if len(kept) + len(new_files) > MAX_POST_IMAGES:
+        flash(f"A post can hold {MAX_POST_IMAGES} pictures.", "error")
+        return None
+    saved_uploads = []
+    for file in new_files:
+        filename, error = save_image_upload(file)
+        if error:
+            for stored in saved_uploads:
+                delete_upload(stored)
+            flash(error, "error")
+            return None
+        if filename:
+            saved_uploads.append(filename)
+
     # A link in the body gets a card under the post. The card is fetched right here,
     # once, and cached in D1 so no page render ever waits on another website.
     link_url = extract_post_link(content, request.host.split(":")[0])
     if link_url:
         ensure_link_preview(link_url)
+
+    if not gplus_schema():
+        # Before migration 0016 the audience columns do not exist yet. Saving the
+        # old shape keeps posting (and the site) working until `npm run db:remote`
+        # has been run - the profile pictures that were already accepted are put
+        # back, because nothing can reference them.
+        for stored in saved_uploads:
+            delete_upload(stored)
+        if item is None:
+            execute(
+                "INSERT INTO posts (title, content, status, user_id, category,"
+                " link_url, public_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                title, content, status, user["id"], category, link_url or None,
+                generate_post_public_id(),
+            )
+            created = first("SELECT last_insert_rowid() AS id")
+            return post_path(created["id"]) if created else url_for("home")
+        execute(
+            "UPDATE posts SET title=?, content=?, status=?, category=?,"
+            " link_url=? WHERE id=?",
+            title, content, status, category, link_url or None, item["id"],
+        )
+        return post_path(item["id"])
+
     if item is None:
         execute(
             "INSERT INTO posts (title, content, status, user_id, category, link_url,"
-            " public_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            " public_id, audience, circle_id, collection_id, community_id, event_id,"
+            " content_warning) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             title, content, status, user["id"], category, link_url or None,
-            generate_post_public_id(),
+            generate_post_public_id(), audience,
+            circle["id"] if circle else None,
+            collection["id"] if collection else None,
+            community["id"] if community else None,
+            event["id"] if event else None,
+            warning or None,
         )
         created = first("SELECT last_insert_rowid() AS id")
-        return post_path(created["id"]) if created else url_for("home")
-    execute(
-        "UPDATE posts SET title=?, content=?, status=?, category=?, link_url=? WHERE id=?",
-        title, content, status, category, link_url or None, item["id"],
-    )
-    return post_path(item["id"])
+        if not created:
+            return url_for("home")
+        post_id = created["id"]
+    else:
+        post_id = item["id"]
+        execute(
+            "UPDATE posts SET title=?, content=?, status=?, category=?, link_url=?,"
+            " audience=?, circle_id=?, collection_id=?, community_id=?, event_id=?,"
+            " content_warning=? WHERE id=?",
+            title, content, status, category, link_url or None, audience,
+            circle["id"] if circle else None,
+            collection["id"] if collection else None,
+            community["id"] if community else None,
+            event["id"] if event else None,
+            warning or None, post_id,
+        )
+        for image in existing_images:
+            if str(image["id"]) in removals:
+                delete_upload(image["filename"])
+                execute("DELETE FROM post_images WHERE id=?", image["id"])
+
+    if gplus_schema():
+        position_row = safe_first(
+            "SELECT COALESCE(MAX(position), -1) + 1 AS next FROM post_images WHERE post_id=?",
+            post_id,
+        )
+        position = int(position_row["next"]) if position_row else 0
+        for index, filename in enumerate(saved_uploads):
+            safe_execute(
+                "INSERT INTO post_images (post_id, filename, position) VALUES (?, ?, ?)",
+                post_id, filename, position + index,
+            )
+        safe_execute("DELETE FROM post_people WHERE post_id=?", post_id)
+        for person in tagged:
+            safe_execute(
+                "INSERT OR IGNORE INTO post_people (post_id, user_id) VALUES (?, ?)",
+                post_id, person["id"],
+            )
+            notify(person["id"], "tag", user["id"], post_id)
+        store_post_tags(post_id, content)
+        notify_mentions(content, user, post_id)
+
+    if gplus2_schema():
+        safe_execute(
+            "UPDATE posts SET page_id=? WHERE id=?",
+            page["id"] if page else None, post_id,
+        )
+
+    return post_path(post_id)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -3098,24 +4578,43 @@ def profile_user(username):
 @app.route("/profile/<username>")
 def profile(username):
     user = profile_user(username)
-    comments = query("""
+    state = viewer_follow_state(user)
+    viewer_id = state["viewer_id"]
+    clause, params = visibility_sql(viewer_id)
+    comments = query(f"""
         SELECT comments.content, comments.created_at, posts.id AS post_id, posts.title,
                posts.public_id AS public_id, users.user_id AS author_public_id
         FROM comments JOIN posts ON posts.id=comments.post_id
         LEFT JOIN users ON users.id = posts.user_id
-        WHERE comments.user_id=? AND posts.status='published'
+        WHERE comments.user_id=? AND {clause}
         ORDER BY comments.created_at DESC LIMIT 20
-    """, user["id"])
+    """, user["id"], *params)
     posts = fetch_posts(
-        "WHERE posts.user_id=? AND posts.status='published'", (user["id"],)
+        f"WHERE {clause} AND posts.user_id=?",
+        tuple(params + [user["id"]]),
+        order="posts.pinned DESC, posts.id DESC",
     )
-    state = viewer_follow_state(user)
+    photo_total = 0
+    if gplus_schema():
+        row = safe_first(
+            "SELECT COUNT(*) AS total FROM post_images JOIN posts"
+            " ON posts.id = post_images.post_id"
+            " WHERE posts.user_id=? AND posts.status='published'",
+            user["id"],
+        )
+        photo_total = int(row["total"]) if row else 0
     return render_template(
         "profile.html",
         user=user,
         posts=posts,
         comments=comments,
         socials=social_links_of(user),
+        collections=collection_rows(user["id"], viewer_id),
+        photo_total=photo_total,
+        blocked=viewer_blocks(current_user(), user["id"]),
+        in_circle=circle_of_author_for(viewer_id, user["id"]),
+        muted=is_muted(viewer_id, user["id"]),
+        albums=albums_for(user["id"], viewer_id),
         **state,
         follower_people=follow_list(
             user["id"], "followers", state["viewer_id"], FOLLOW_PREVIEW_LIMIT
@@ -3160,6 +4659,14 @@ def follow(username):
     if not user:
         abort(404)
     viewer_id = session["user_db_id"]
+    # A block closes the relationship in both directions; following somebody you
+    # have blocked (or who has blocked you) is refused here, not just hidden in a
+    # template.
+    if user["id"] != viewer_id and is_blocked(viewer_id, user["id"]):
+        flash("You cannot follow that account.", "error")
+        return redirect(safe_next(
+            request.form.get("next"), url_for("profile", username=user["username"])
+        ))
     # Following yourself is refused here rather than at the button, so a hand-made
     # request cannot create a row the site would then have to render around.
     if user["id"] != viewer_id:
@@ -3176,6 +4683,7 @@ def follow(username):
                 " VALUES (?, ?)",
                 viewer_id, user["id"],
             )
+            notify(user["id"], "follow", viewer_id)
             flash(f"You are now following {user['display_name']}.", "success")
     return redirect(safe_next(
         request.form.get("next"), url_for("profile", username=user["username"])
@@ -3189,10 +4697,33 @@ def profile_settings():
     if request.method == "POST":
         display_name = request.form.get("display_name", "").strip()
         bio = request.form.get("bio", "").strip()
+        tagline = request.form.get("tagline", "").strip()
+        nickname = request.form.get("nickname", "").strip()
+        # The About card's free-text fields, kept in one dict so the column names
+        # and the form names cannot drift apart.
+        about = {
+            "about_work": request.form.get("about_work", "").strip(),
+            "about_education": request.form.get("about_education", "").strip(),
+            "about_places": request.form.get("about_places", "").strip(),
+            "about_relationship": request.form.get("about_relationship", "").strip(),
+            "about_birthday": request.form.get("about_birthday", "").strip(),
+            "about_gender": request.form.get("about_gender", "").strip(),
+            "about_contact": request.form.get("about_contact", "").strip(),
+            "bragging_rights": request.form.get("bragging_rights", "").strip(),
+        }
+        cover_position = request.form.get("cover_position", "center")
+        if cover_position not in ("center", "top", "bottom"):
+            cover_position = "center"
         if not 1 <= len(display_name) <= 40:
             flash("Display name must be 1–40 characters.", "error")
         elif len(bio) > MAX_BIO_LENGTH:
             flash(f"Your bio must be {MAX_BIO_LENGTH} characters or fewer.", "error")
+        elif len(tagline) > MAX_TAGLINE_LENGTH:
+            flash(f"Your tagline must be {MAX_TAGLINE_LENGTH} characters or fewer.", "error")
+        elif len(nickname) > MAX_NICKNAME_LENGTH:
+            flash(f"A nickname must be {MAX_NICKNAME_LENGTH} characters or fewer.", "error")
+        elif any(len(value) > MAX_ABOUT_LENGTH for value in about.values()):
+            flash(f"Each About line must be {MAX_ABOUT_LENGTH} characters or fewer.", "error")
         else:
             links, link_error = parse_social_links(request.form)
             picture, picture_error = save_image_upload(request.files.get("profile_picture"))
@@ -3207,9 +4738,13 @@ def profile_settings():
                 fields = {
                     "display_name": display_name,
                     "bio": bio or None,
+                    "tagline": tagline or None,
+                    "nickname": nickname or None,
+                    "cover_position": cover_position,
                     # The list is only ever read and written as a whole, so it
                     # lives in one JSON column instead of its own table.
                     "social_links": json.dumps(links) if links else None,
+                    **{column: value or None for column, value in about.items()},
                 }
                 removed = []
                 if picture:
@@ -3225,6 +4760,15 @@ def profile_settings():
                     fields["banner"] = None
                     removed.append(user["banner"])
 
+                # A database that has not had migration 0016 applied cannot take
+                # the new profile columns; the old form fields still save.
+                if not gplus_schema():
+                    for column in ("tagline", "nickname", "cover_position",
+                                   "about_work", "about_education", "about_places",
+                                   "about_relationship", "about_birthday",
+                                   "about_gender", "about_contact",
+                                   "bragging_rights"):
+                        fields.pop(column, None)
                 # Column names come from the literals above, not from input.
                 assignments = ", ".join(f"{column}=?" for column in fields)
                 execute(
@@ -3253,6 +4797,9 @@ def profile_settings():
         max_other_links=MAX_OTHER_SOCIAL_LINKS,
         max_social_url=MAX_SOCIAL_URL,
         max_social_label=MAX_SOCIAL_LABEL,
+        max_tagline=MAX_TAGLINE_LENGTH,
+        max_nickname=MAX_NICKNAME_LENGTH,
+        max_about=MAX_ABOUT_LENGTH,
     )
 
 
@@ -3496,6 +5043,9 @@ def start_conversation():
     if not target or target.get("deleted_at"):
         flash(f"There is no account called @{username}.", "error")
         return redirect(url_for("messages"))
+    if is_blocked(current_user()["id"], target["id"]):
+        flash("You cannot message that account.", "error")
+        return redirect(url_for("messages"))
     return redirect(url_for("new_conversation", username=target["username"]))
 
 
@@ -3515,6 +5065,9 @@ def new_conversation(username):
     if target["id"] == user["id"]:
         flash("That is your own account - there is nobody to message.", "error")
         return redirect(url_for("profile", username=user["username"]))
+    if is_blocked(user["id"], target["id"]):
+        flash("You cannot message that account.", "error")
+        return redirect(url_for("messages"))
     existing = conversation_between(user["id"], target["id"])
     if existing:
         if request.method == "POST":
@@ -3585,6 +5138,12 @@ def conversation(conversation_id):
     if request.method == "POST":
         if not can_post:
             flash("Only the two people in a conversation can post to it.", "error")
+            return redirect(url_for("conversation", conversation_id=conversation_id))
+        # A block still lets the two of them read what was already said, but it
+        # closes the thread to anything new - the same rule G+ applied.
+        other_id = conversation_other_id(thread, user["id"] if mine else 0)
+        if mine and other_id and is_blocked(user["id"], other_id):
+            flash("You cannot message that account.", "error")
             return redirect(url_for("conversation", conversation_id=conversation_id))
         body = request.form.get("body", "").strip()
         error = conversation_body_error(body)
@@ -3722,6 +5281,20 @@ def admin():
     # What each account's current ban was for, and every moderation action on
     # record: migration 0009's columns on `users` only remember the last ban, and
     # nothing at all about what caused it.
+    reports = safe_query("""
+        SELECT reports.*, reporter.username AS reporter_username,
+               target.username AS target_username,
+               target.display_name AS target_name,
+               posts.title AS post_title, posts.public_id AS post_public_id,
+               comments.content AS comment_content
+        FROM reports
+        LEFT JOIN users reporter ON reporter.id = reports.reporter_id
+        LEFT JOIN users target ON target.id = reports.target_user_id
+        LEFT JOIN posts ON posts.id = reports.post_id
+        LEFT JOIN comments ON comments.id = reports.comment_id
+        WHERE reports.resolved_at IS NULL
+        ORDER BY reports.id DESC LIMIT 50
+    """) if gplus_schema() else []
     return render_template(
         "admin.html",
         posts=posts, comments=comments, users=users,
@@ -3730,6 +5303,13 @@ def admin():
         content_by_user=moderatable_content(users),
         moderation=moderation_account(),
         moderation_threads=moderation_threads(),
+        reports=reports,
+        gplus=gplus_schema(),
+        email_ready=email_configured(),
+        email_pending=pending_email_count(),
+        email_recent=safe_query(
+            "SELECT * FROM email_outbox ORDER BY id DESC LIMIT 12"
+        ) if gplus2_schema() else [],
     )
 
 
@@ -3913,6 +5493,1627 @@ def admin_unban_user(user_id):
            else "The notice could not be sent - has migration 0014 been applied?"),
         "success" if told else "error",
     )
+    return redirect(url_for("admin") + "#users")
+
+
+# Google+ revival: circles, collections, communities, events ---------------------
+# The screens G+ built its social graph out of. Every one of them is a thin
+# layer over the tables migration 0016 adds; the streams themselves reuse
+# fetch_posts() and visibility_sql(), so a circle post is filtered by the same
+# rule everywhere it can appear.
+
+
+def revival_ready():
+    """False (with an explanation) when migration 0016 has not been applied."""
+    if gplus_schema():
+        return True
+    flash("That part of the site needs the newest database migration. Run "
+          "`npm run db:remote` and reload.", "error")
+    return False
+
+
+@app.route("/circles")
+@login_required
+def circles():
+    """Manage the circles G+ organised everybody into."""
+    if not revival_ready():
+        return redirect(url_for("home"))
+    user = current_user()
+    rows = circle_rows(user["id"])
+    members = {row["id"]: circle_member_rows(row["id"]) for row in rows}
+    return render_template(
+        "circles.html",
+        circles=rows,
+        members=members,
+        max_circle_name=MAX_CIRCLE_NAME,
+    )
+
+
+@app.post("/circles/create")
+@login_required
+def create_circle():
+    if not revival_ready():
+        return redirect(url_for("home"))
+    name = request.form.get("name", "").strip()
+    if not 1 <= len(name) <= MAX_CIRCLE_NAME:
+        flash(f"A circle needs a name of 1-{MAX_CIRCLE_NAME} characters.", "error")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO circles (user_id, name) VALUES (?, ?)",
+            current_user()["id"], name,
+        )
+        flash(f"Circle \"{name}\" created.", "success")
+    return redirect(url_for("circles"))
+
+
+@app.post("/circles/<int:circle_id>/add")
+@login_required
+def add_to_circle(circle_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    circle = circle_by_id(circle_id)
+    if not circle or circle["user_id"] != current_user()["id"]:
+        abort(404)
+    username = request.form.get("username", "").strip().lstrip("@")
+    person = safe_first(
+        "SELECT id, username, display_name FROM users WHERE username=? COLLATE NOCASE",
+        username,
+    )
+    if not person:
+        flash("No account by that handle.", "error")
+    elif person["id"] == current_user()["id"]:
+        flash("You are not a circle; you are the person holding it.", "error")
+    elif safe_first("SELECT 1 FROM circle_members WHERE circle_id=? AND user_id=?",
+                    circle["id"], person["id"]):
+        flash(f"{person['display_name']} is already in {circle['name']}.", "error")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO circle_members (circle_id, user_id) VALUES (?, ?)",
+            circle["id"], person["id"],
+        )
+        flash(f"Added {person['display_name']} to {circle['name']}.", "success")
+    return redirect(url_for("circles"))
+
+
+@app.post("/circles/<int:circle_id>/remove/<int:user_id>")
+@login_required
+def remove_from_circle(circle_id, user_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    circle = circle_by_id(circle_id)
+    if not circle or circle["user_id"] != current_user()["id"]:
+        abort(404)
+    safe_execute(
+        "DELETE FROM circle_members WHERE circle_id=? AND user_id=?",
+        circle["id"], user_id,
+    )
+    flash("Removed from the circle.", "success")
+    return redirect(url_for("circles"))
+
+
+@app.post("/circles/<int:circle_id>/delete")
+@login_required
+def delete_circle(circle_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    circle = circle_by_id(circle_id)
+    if not circle or circle["user_id"] != current_user()["id"]:
+        abort(404)
+    # Posts shared with this circle were addressed to a group that is going away.
+    # They are not deleted; they become "only me", the honest reading of a share
+    # whose audience no longer exists.
+    safe_execute(
+        "UPDATE posts SET audience='private', circle_id=NULL WHERE circle_id=?",
+        circle["id"],
+    )
+    safe_execute("DELETE FROM circles WHERE id=?", circle["id"])
+    flash("Circle deleted. Posts shared with it are now visible only to you.", "success")
+    return redirect(url_for("circles"))
+
+
+# Collections ------------------------------------------------------------------
+
+@app.route("/collections")
+@login_required
+def collections():
+    if not revival_ready():
+        return redirect(url_for("home"))
+    user = current_user()
+    return render_template(
+        "collections.html",
+        collections=collection_rows(user["id"], user["id"]),
+        max_name=MAX_COLLECTION_NAME,
+        max_description=MAX_COLLECTION_DESCRIPTION,
+    )
+
+
+@app.post("/collections/create")
+@login_required
+def create_collection():
+    if not revival_ready():
+        return redirect(url_for("home"))
+    name = request.form.get("name", "").strip()
+    description = request.form.get("description", "").strip()
+    if not 1 <= len(name) <= MAX_COLLECTION_NAME:
+        flash(f"A collection needs a name of 1-{MAX_COLLECTION_NAME} characters.", "error")
+    elif len(description) > MAX_COLLECTION_DESCRIPTION:
+        flash("That description is too long.", "error")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO collections (user_id, name, description)"
+            " VALUES (?, ?, ?)",
+            current_user()["id"], name, description or None,
+        )
+        flash(f"Collection \"{name}\" created. Pick it when you write a post.", "success")
+    return redirect(url_for("collections"))
+
+
+@app.route("/collections/<int:collection_id>")
+def collection(collection_id):
+    if not revival_ready():
+        abort(404)
+    row = collection_by_id(collection_id)
+    if not row:
+        abort(404)
+    owner = first("SELECT * FROM users WHERE id=?", row["user_id"])
+    if not owner or owner.get("deleted_at"):
+        abort(404)
+    clause, params = visibility_sql(session.get("user_db_id") or 0)
+    posts = fetch_posts(
+        f"WHERE {clause} AND posts.collection_id=?",
+        tuple(params + [collection_id]), order="posts.id DESC",
+    )
+    return render_template(
+        "collection.html", collection=row, owner=owner, posts=posts,
+    )
+
+
+@app.post("/collections/<int:collection_id>/delete")
+@login_required
+def delete_collection(collection_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = collection_by_id(collection_id)
+    if not row or row["user_id"] != current_user()["id"]:
+        abort(404)
+    safe_execute("UPDATE posts SET collection_id=NULL WHERE collection_id=?", collection_id)
+    safe_execute("DELETE FROM collections WHERE id=?", collection_id)
+    flash("Collection deleted. Its posts are still on your profile.", "success")
+    return redirect(url_for("collections"))
+
+
+# Communities -------------------------------------------------------------------
+
+@app.route("/communities")
+def communities():
+    if not revival_ready():
+        return render_template("communities.html", communities=[], needs_migration=True)
+    viewer = current_user()
+    return render_template(
+        "communities.html",
+        communities=community_rows(viewer["id"] if viewer else 0),
+        needs_migration=False,
+        max_name=MAX_COMMUNITY_NAME,
+        max_description=MAX_COMMUNITY_DESCRIPTION,
+    )
+
+
+@app.post("/communities/create")
+@login_required
+def create_community():
+    if not revival_ready():
+        return redirect(url_for("home"))
+    name = request.form.get("name", "").strip()
+    slug = request.form.get("slug", "").strip().lower()
+    description = request.form.get("description", "").strip()
+    if not 1 <= len(name) <= MAX_COMMUNITY_NAME:
+        flash(f"A community needs a name of 1-{MAX_COMMUNITY_NAME} characters.", "error")
+    elif not re.fullmatch(r"[a-z0-9-]{3,40}", slug):
+        flash("The address can be 3-40 lowercase letters, numbers or hyphens.", "error")
+    elif community_by_slug(slug):
+        flash("That community address is taken.", "error")
+    elif len(description) > MAX_COMMUNITY_DESCRIPTION:
+        flash("That description is too long.", "error")
+    else:
+        execute(
+            "INSERT INTO communities (slug, name, description, owner_id)"
+            " VALUES (?, ?, ?, ?)",
+            slug, name, description or None, current_user()["id"],
+        )
+        created = first("SELECT last_insert_rowid() AS id")
+        if created:
+            safe_execute(
+                "INSERT OR IGNORE INTO community_members (community_id, user_id, role)"
+                " VALUES (?, ?, 'owner')",
+                created["id"], current_user()["id"],
+            )
+        flash(f"Community \"{name}\" created.", "success")
+        return redirect(url_for("community", slug=slug))
+    return redirect(url_for("communities"))
+
+
+@app.route("/c/<slug>")
+def community(slug):
+    if not revival_ready():
+        abort(404)
+    row = community_by_slug(slug)
+    if not row:
+        abort(404)
+    owner = first("SELECT * FROM users WHERE id=?", row["owner_id"])
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else 0
+    membership = community_membership(row["id"], viewer_id)
+    clause, params = visibility_sql(viewer_id)
+    posts = fetch_posts(
+        f"WHERE {clause} AND posts.community_id=?",
+        tuple(params + [row["id"]]), order="posts.id DESC", limit=40,
+    )
+    member_rows = safe_query("""
+        SELECT users.id, users.username, users.display_name, users.profile_picture,
+               community_members.role, community_members.joined_at
+        FROM community_members JOIN users ON users.id = community_members.user_id
+        WHERE community_members.community_id=?
+        ORDER BY community_members.joined_at LIMIT 60
+    """, row["id"])
+    return render_template(
+        "community.html", community=row, owner=owner, posts=posts,
+        membership=membership, members=member_rows,
+        is_community_owner=bool(viewer and row["owner_id"] == viewer["id"]),
+        can_manage_members=bool(membership and membership["role"] in ("owner", "moderator")),
+    )
+
+
+@app.post("/c/<slug>/join")
+@login_required
+def join_community(slug):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row:
+        abort(404)
+    safe_execute(
+        "INSERT OR IGNORE INTO community_members (community_id, user_id, role)"
+        " VALUES (?, ?, 'member')",
+        row["id"], current_user()["id"],
+    )
+    flash(f"Joined {row['name']}.", "success")
+    return redirect(url_for("community", slug=slug))
+
+
+@app.post("/c/<slug>/leave")
+@login_required
+def leave_community(slug):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row:
+        abort(404)
+    if row["owner_id"] == current_user()["id"]:
+        flash("The owner cannot leave the community; delete it instead.", "error")
+    else:
+        safe_execute(
+            "DELETE FROM community_members WHERE community_id=? AND user_id=?",
+            row["id"], current_user()["id"],
+        )
+        flash(f"Left {row['name']}.", "success")
+    return redirect(url_for("community", slug=slug))
+
+
+# Events ------------------------------------------------------------------------
+
+@app.route("/events")
+def events():
+    if not revival_ready():
+        return render_template("events.html", events=[], needs_migration=True)
+    return render_template(
+        "events.html", events=event_rows(), needs_migration=False,
+        max_title=MAX_EVENT_TITLE, max_description=MAX_EVENT_DESCRIPTION,
+        max_location=MAX_EVENT_LOCATION,
+    )
+
+
+@app.route("/events/new", methods=["GET", "POST"])
+@login_required
+def new_event():
+    if not revival_ready():
+        return redirect(url_for("home"))
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        description = request.form.get("description", "").strip()
+        location = request.form.get("location", "").strip()
+        starts = request.form.get("starts_at", "").strip().replace("T", " ")
+        if not 1 <= len(title) <= MAX_EVENT_TITLE:
+            flash("Give the event a title.", "error")
+        elif not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", starts):
+            flash("Pick a date and time for the event.", "error")
+        else:
+            execute(
+                "INSERT INTO events (owner_id, title, description, starts_at, location)"
+                " VALUES (?, ?, ?, ?, ?)",
+                current_user()["id"], title, description or None, starts,
+                location or None,
+            )
+            created = first("SELECT last_insert_rowid() AS id")
+            if created:
+                safe_execute(
+                    "INSERT OR IGNORE INTO event_attendees (event_id, user_id, status)"
+                    " VALUES (?, ?, 'going')",
+                    created["id"], current_user()["id"],
+                )
+                flash("Event created.", "success")
+                return redirect(url_for("event", event_id=created["id"]))
+    return render_template(
+        "event_editor.html", max_title=MAX_EVENT_TITLE,
+        max_description=MAX_EVENT_DESCRIPTION, max_location=MAX_EVENT_LOCATION,
+    )
+
+
+@app.route("/events/<int:event_id>")
+def event(event_id):
+    if not revival_ready():
+        abort(404)
+    row = event_by_id(event_id)
+    if not row:
+        abort(404)
+    owner = first("SELECT * FROM users WHERE id=?", row["owner_id"])
+    viewer = current_user()
+    clause, params = visibility_sql(viewer["id"] if viewer else 0)
+    posts = fetch_posts(
+        f"WHERE {clause} AND posts.event_id=?",
+        tuple(params + [event_id]), order="posts.id DESC", limit=20,
+    )
+    attendees = safe_query("""
+        SELECT users.username, users.display_name, users.profile_picture,
+               event_attendees.status
+        FROM event_attendees JOIN users ON users.id = event_attendees.user_id
+        WHERE event_attendees.event_id=?
+        ORDER BY event_attendees.updated_at
+    """, event_id)
+    return render_template(
+        "event.html", event=row, owner=owner, posts=posts, attendees=attendees,
+        attendance=event_attendance(event_id, viewer["id"] if viewer else 0),
+    )
+
+
+@app.post("/events/<int:event_id>/rsvp")
+@login_required
+def rsvp_event(event_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = event_by_id(event_id)
+    if not row:
+        abort(404)
+    status = request.form.get("status", "going")
+    if status not in ("going", "maybe", "no"):
+        status = "going"
+    safe_execute(
+        "INSERT INTO event_attendees (event_id, user_id, status)"
+        " VALUES (?, ?, ?)"
+        " ON CONFLICT(event_id, user_id) DO UPDATE SET status=excluded.status,"
+        " updated_at=datetime('now')",
+        event_id, current_user()["id"], status,
+    )
+    return redirect(url_for("event", event_id=event_id))
+
+
+# Notifications ------------------------------------------------------------------
+
+@app.route("/notifications")
+@login_required
+def notifications():
+    if not revival_ready():
+        flash("Notifications need the newest database migration.", "error")
+        return redirect(url_for("home"))
+    user = current_user()
+    rows = notification_rows(user["id"])
+    return render_template(
+        "notifications.html", notifications=rows,
+        notification_text=notification_text,
+        notification_url=notification_url,
+    )
+
+
+@app.post("/notifications/read")
+@login_required
+def read_notifications():
+    if not revival_ready():
+        return redirect(url_for("home"))
+    safe_execute(
+        "UPDATE notifications SET read_at=datetime('now')"
+        " WHERE user_id=? AND read_at IS NULL",
+        current_user()["id"],
+    )
+    flash("All caught up.", "success")
+    return redirect(url_for("notifications"))
+
+
+# Search, tags, discovery ---------------------------------------------------------
+
+def like_pattern(value):
+    """A LIKE pattern that cannot be widened by a % or _ in the query."""
+    escaped = value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+@app.route("/search")
+def search():
+    """Posts, people and comments in one answer - the hole G+ never had."""
+    query_text = request.args.get("q", "").strip()[:80]
+    posts = []
+    people = []
+    comments = []
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else 0
+    if query_text:
+        pattern = like_pattern(query_text)
+        clause, params = visibility_sql()
+        posts = fetch_posts(
+            f"WHERE {clause} AND (posts.title LIKE ? ESCAPE '\\'"
+            f" OR posts.content LIKE ? ESCAPE '\\')",
+            tuple(params + [pattern, pattern]),
+            order="posts.id DESC", limit=30,
+        )
+        people = safe_query(
+            "SELECT id, username, display_name, profile_picture, bio, nickname,"
+            " (SELECT COUNT(*) FROM follows WHERE followed_id=users.id) AS follower_count,"
+            " (SELECT COUNT(*) FROM follows mine WHERE mine.follower_id=?"
+            "   AND mine.followed_id=users.id) AS viewer_follows"
+            " FROM users WHERE deleted_at IS NULL AND (username LIKE ? ESCAPE '\\'"
+            " OR display_name LIKE ? ESCAPE '\\' OR nickname LIKE ? ESCAPE '\\')"
+            " ORDER BY follower_count DESC LIMIT 20",
+            viewer_id, pattern, pattern, pattern,
+        ) if gplus_schema() else safe_query(
+            "SELECT id, username, display_name, profile_picture, bio,"
+            " (SELECT COUNT(*) FROM follows WHERE followed_id=users.id) AS follower_count,"
+            " (SELECT COUNT(*) FROM follows mine WHERE mine.follower_id=?"
+            "   AND mine.followed_id=users.id) AS viewer_follows"
+            " FROM users WHERE deleted_at IS NULL AND (username LIKE ? ESCAPE '\\'"
+            " OR display_name LIKE ? ESCAPE '\\')"
+            " ORDER BY follower_count DESC LIMIT 20",
+            viewer_id, pattern, pattern,
+        )
+        if gplus_schema():
+            comments = safe_query(
+                "SELECT comments.*, users.username, users.display_name,"
+                " posts.title AS post_title, posts.public_id AS post_public_id"
+                " FROM comments JOIN users ON users.id = comments.user_id"
+                " JOIN posts ON posts.id = comments.post_id"
+                f" WHERE ({clause.replace('posts.', 'posts.')}) AND posts.status='published'"
+                " AND comments.content LIKE ? ESCAPE '\\'"
+                " ORDER BY comments.id DESC LIMIT 20",
+                *(params + [pattern]),
+            )
+    return render_template(
+        "search.html", q=query_text, posts=posts, people=people, comments=comments,
+    )
+
+
+@app.route("/tag/<tag>")
+def tag(tag):
+    tag = (tag or "").strip().lower()[:MAX_FEED_TAG]
+    if not re.fullmatch(r"[a-z0-9_]{1,40}", tag):
+        abort(404)
+    clause, params = visibility_sql()
+    posts = fetch_posts(
+        f"WHERE {clause} AND posts.id IN (SELECT post_id FROM post_tags WHERE tag=?)",
+        tuple(params + [tag]), order="posts.id DESC", limit=40,
+    ) if gplus_schema() else []
+    return render_template("tag.html", tag=tag, posts=posts)
+
+
+@app.route("/explore")
+def explore():
+    """G+'s "What's Hot": what the site is actually paying attention to."""
+    clause, params = visibility_sql()
+    if gplus_schema():
+        engagement = (
+            "(COALESCE((SELECT SUM(value) FROM post_votes WHERE post_id=posts.id), 0)"
+            " + 3 * (SELECT COUNT(*) FROM comments WHERE post_id=posts.id)"
+            " + 4 * (SELECT COUNT(*) FROM shares WHERE post_id=posts.id)"
+            " + 2 * (SELECT COUNT(*) FROM post_votes WHERE post_id=posts.id AND value=1))"
+        )
+        order = f"{engagement} DESC, posts.id DESC"
+        where = f"WHERE {clause} AND posts.created_at >= datetime('now', '-14 days')"
+    else:
+        order = ("COALESCE((SELECT SUM(value) FROM post_votes WHERE post_id=posts.id), 0)"
+                 " DESC, posts.id DESC")
+        where = "WHERE " + clause
+    posts = fetch_posts(
+        where, tuple(params), order=order, limit=30,
+    )
+    return render_template("explore.html", posts=posts, tags=top_tags(20),
+                           people=people_suggestions(8))
+
+
+def people_suggestions(limit=12):
+    """Accounts to follow: mutuals first, then the most-followed strangers.
+
+    A local site does not have G+'s contact graph, so follows-of-follows is the
+    honest signal it does have - and it is what made G+'s "Find people" useful.
+    """
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else 0
+    if gplus_schema():
+        return safe_query(f"""
+            SELECT users.id, users.username, users.display_name, users.profile_picture,
+                   users.bio, users.tagline,
+                   (SELECT COUNT(*) FROM follows f WHERE f.followed_id=users.id)
+                       AS follower_count,
+                   (SELECT COUNT(*) FROM follows mutual
+                     WHERE mutual.follower_id=users.id AND mutual.followed_id=?
+                       AND mutual.followed_id IS NOT NULL) AS they_follow_me,
+                   (SELECT COUNT(*) FROM follows mine
+                     WHERE mine.follower_id=? AND mine.followed_id=users.id)
+                       AS i_follow
+            FROM users
+            WHERE users.deleted_at IS NULL AND users.id<>?
+              AND users.username <> ? COLLATE NOCASE
+              AND users.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id=?)
+              AND users.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id=?)
+              AND users.id NOT IN (SELECT followed_id FROM follows WHERE follower_id=?)
+            ORDER BY they_follow_me DESC, follower_count DESC, users.id DESC
+            LIMIT {int(limit)}
+        """, viewer_id, viewer_id, viewer_id, moderation_username(),
+             viewer_id, viewer_id, viewer_id)
+    return safe_query(f"""
+        SELECT users.id, users.username, users.display_name, users.profile_picture,
+               users.bio,
+               (SELECT COUNT(*) FROM follows f WHERE f.followed_id=users.id)
+                   AS follower_count,
+               (SELECT COUNT(*) FROM follows mine
+                 WHERE mine.follower_id=? AND mine.followed_id=users.id) AS i_follow
+        FROM users WHERE users.deleted_at IS NULL AND users.id<>?
+          AND users.id NOT IN (SELECT followed_id FROM follows WHERE follower_id=?)
+        ORDER BY follower_count DESC, users.id DESC LIMIT {int(limit)}
+    """, viewer_id, viewer_id, viewer_id)
+
+
+@app.route("/people")
+def people():
+    viewer = current_user()
+    return render_template(
+        "people.html", people=people_suggestions(30),
+        following=(follow_list(viewer["id"], "following", viewer["id"], 200)
+                   if viewer else []),
+    )
+
+
+@app.route("/profile/<username>/photos")
+def photos(username):
+    user = profile_user(username)
+    # One row per picture, so the grid does not care how many posts they came in.
+    rows = []
+    for item in photo_posts_of(user["id"]):
+        for image in post_image_rows(item["id"]):
+            rows.append({"post": item, "image": image})
+    tagged_posts = photo_posts_of(user["id"], tagged=True)
+    for item in tagged_posts:
+        item["gallery"] = post_image_rows(item["id"])
+    state = viewer_follow_state(user)
+    return render_template(
+        "photos.html", user=user, rows=rows, tagged_posts=tagged_posts,
+        state=state,
+        albums=albums_for(user["id"], state["viewer_id"]),
+        max_album_name=MAX_ALBUM_NAME,
+        max_album_description=MAX_ALBUM_DESCRIPTION,
+    )
+
+
+# Post and comment actions ---------------------------------------------------------
+
+def post_row(post_id):
+    rows = fetch_posts("WHERE posts.id=?", (post_id,))
+    return rows[0] if rows else None
+
+
+def comment_row(comment_id):
+    return first("""
+        SELECT comments.*, posts.public_id AS post_public_id,
+               posts.user_id AS post_user_id, posts.locked AS post_locked
+        FROM comments JOIN posts ON posts.id = comments.post_id
+        WHERE comments.id=?
+    """, comment_id)
+
+
+@app.post("/post/<int:post_id>/share")
+@login_required
+def share_post(post_id):
+    """Reshare: a new post in your stream quoting the original.
+
+    Stored as a real post row with ``share_of`` set, so it reaches the feed,
+    profiles and pagination through the same path as everything else - and the
+    original is quoted rather than copied.
+    """
+    if not revival_ready():
+        return redirect(url_for("home"))
+    item = post_row(post_id)
+    if not item or not may_view(item):
+        abort(404)
+    body = request.form.get("body", "").strip()
+    if len(body) > MAX_SHARE_BODY:
+        flash(f"A share note can be {MAX_SHARE_BODY} characters or fewer.", "error")
+        return redirect(post_path(post_id))
+    user = current_user()
+    audience = request.form.get("audience", "public")
+    if audience not in ("public", "private"):
+        audience = "public"
+    execute(
+        "INSERT INTO posts (title, content, status, user_id, category, public_id,"
+        " share_of, audience) VALUES (?, ?, 'published', ?, ?, ?, ?, ?)",
+        item["title"], body, user["id"], post_category_for(user["username"]),
+        generate_post_public_id(), item["id"], audience,
+    )
+    created = first("SELECT last_insert_rowid() AS id")
+    if not created:
+        return redirect(post_path(post_id))
+    safe_execute(
+        "INSERT INTO shares (post_id, user_id, post_id_created) VALUES (?, ?, ?)",
+        item["id"], user["id"], created["id"],
+    )
+    notify(item["user_id"], "share", user["id"], item["id"])
+    notify_mentions(body, user, created["id"])
+    store_post_tags(created["id"], body)
+    flash("Shared to your stream.", "success")
+    return redirect(post_path(created["id"]))
+
+
+@app.post("/post/<int:post_id>/pin")
+@login_required
+def pin_post(post_id):
+    item = post_row(post_id)
+    if not item:
+        abort(404)
+    if not can_manage_post(item):
+        flash("Only the author can pin a post.", "error")
+        return redirect(post_path(post_id))
+    safe_execute(
+        "UPDATE posts SET pinned=CASE WHEN pinned=1 THEN 0 ELSE 1 END WHERE id=?",
+        post_id,
+    )
+    flash("Pin changed.", "success")
+    return redirect(post_path(post_id))
+
+
+@app.post("/post/<int:post_id>/lock")
+@login_required
+def lock_post(post_id):
+    item = post_row(post_id)
+    if not item:
+        abort(404)
+    if not can_manage_post(item):
+        flash("Only the author can lock a post.", "error")
+        return redirect(post_path(post_id))
+    safe_execute(
+        "UPDATE posts SET locked=CASE WHEN locked=1 THEN 0 ELSE 1 END WHERE id=?",
+        post_id,
+    )
+    flash("Comments are now " + ("open" if item.get("locked") else "closed") + ".", "success")
+    return redirect(post_path(post_id))
+
+
+@app.post("/post/<int:post_id>/mute")
+@login_required
+def mute_post(post_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    user = current_user()
+    muted = safe_first(
+        "SELECT 1 FROM post_mutes WHERE post_id=? AND user_id=?", post_id, user["id"]
+    )
+    if muted:
+        safe_execute("DELETE FROM post_mutes WHERE post_id=? AND user_id=?", post_id, user["id"])
+        flash("Notifications for this post are back on.", "success")
+    else:
+        safe_execute("INSERT OR IGNORE INTO post_mutes (post_id, user_id) VALUES (?, ?)",
+                     post_id, user["id"])
+        flash("You will not be notified about this post again.", "success")
+    return redirect(request.referrer or post_path(post_id))
+
+
+@app.post("/post/<int:post_id>/report")
+@login_required
+def report_post(post_id):
+    item = post_row(post_id)
+    if not item:
+        abort(404)
+    if not revival_ready():
+        return redirect(url_for("home"))
+    reason = request.form.get("reason", "").strip()[:MAX_REPORT_REASON]
+    if len(reason) < 3:
+        flash("Say what is wrong with the post.", "error")
+    else:
+        safe_execute(
+            "INSERT INTO reports (reporter_id, kind, post_id, target_user_id, reason)"
+            " VALUES (?, 'post', ?, ?, ?)",
+            current_user()["id"], post_id, item.get("user_id"), reason,
+        )
+        flash("Reported. An admin will look at it.", "success")
+    return redirect(post_path(post_id))
+
+
+@app.post("/comment/<int:comment_id>/vote")
+@login_required
+def vote_comment(comment_id):
+    """+1 a comment; pressing it again takes the +1 back."""
+    if not revival_ready():
+        return redirect(url_for("home"))
+    comment = comment_row(comment_id)
+    if not comment:
+        abort(404)
+    user = current_user()
+    existing = safe_first(
+        "SELECT 1 FROM comment_votes WHERE comment_id=? AND user_id=?",
+        comment_id, user["id"],
+    )
+    if existing:
+        safe_execute("DELETE FROM comment_votes WHERE comment_id=? AND user_id=?",
+                     comment_id, user["id"])
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO comment_votes (comment_id, user_id) VALUES (?, ?)",
+            comment_id, user["id"],
+        )
+        notify(comment["user_id"], "comment_like", user["id"],
+               comment["post_id"], comment_id)
+    return redirect(request.referrer or post_path(comment["post_id"]) + f"#comment-{comment_id}")
+
+
+@app.post("/comment/<int:comment_id>/edit")
+@login_required
+def edit_comment(comment_id):
+    comment = comment_row(comment_id)
+    if not comment:
+        abort(404)
+    user = current_user()
+    if comment["user_id"] != user["id"]:
+        flash("You can only edit your own comments.", "error")
+        return redirect(post_path(comment["post_id"]) + f"#comment-{comment_id}")
+    content = request.form.get("content", "").strip()
+    if not content:
+        flash("A comment cannot be empty.", "error")
+    elif len(content) > 2000:
+        flash("Your comment is too long.", "error")
+    else:
+        execute("UPDATE comments SET content=? WHERE id=?", content, comment_id)
+        notify_mentions(content, user, comment["post_id"], comment_id)
+        flash("Comment edited.", "success")
+    return redirect(post_path(comment["post_id"]) + f"#comment-{comment_id}")
+
+
+@app.post("/comment/<int:comment_id>/delete")
+@login_required
+def remove_comment(comment_id):
+    """Delete a comment: its author, the post's author, or an admin.
+
+    G+ let the person whose post it was clear their own thread; before this the
+    only person who could delete a comment was the admin.
+    """
+    comment = comment_row(comment_id)
+    if not comment:
+        abort(404)
+    user = current_user()
+    allowed = (
+        comment["user_id"] == user["id"]
+        or comment["post_user_id"] == user["id"]
+        or is_admin()
+    )
+    if not allowed:
+        flash("You cannot delete that comment.", "error")
+    else:
+        safe_execute(
+            "DELETE FROM comment_votes WHERE comment_id IN"
+            " (SELECT id FROM comments WHERE id=? OR parent_id=?)",
+            comment_id, comment_id,
+        )
+        execute("DELETE FROM comments WHERE id=?", comment_id)
+        flash("Comment deleted.", "success")
+    return redirect(post_path(comment["post_id"]) + "#comments")
+
+
+@app.post("/comment/<int:comment_id>/report")
+@login_required
+def report_comment(comment_id):
+    comment = comment_row(comment_id)
+    if not comment:
+        abort(404)
+    if not revival_ready():
+        return redirect(url_for("home"))
+    reason = request.form.get("reason", "").strip()[:MAX_REPORT_REASON]
+    if len(reason) < 3:
+        flash("Say what is wrong with the comment.", "error")
+    else:
+        safe_execute(
+            "INSERT INTO reports (reporter_id, kind, comment_id, target_user_id, reason)"
+            " VALUES (?, 'comment', ?, ?, ?)",
+            current_user()["id"], comment_id, comment["user_id"], reason,
+        )
+        flash("Reported. An admin will look at it.", "success")
+    return redirect(post_path(comment["post_id"]) + f"#comment-{comment_id}")
+
+
+@app.post("/profile/<username>/block")
+@login_required
+def block_user(username):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    target = profile_user(username)
+    viewer = current_user()
+    if target["id"] == viewer["id"]:
+        flash("You cannot block yourself.", "error")
+        return redirect(url_for("profile", username=username))
+    existing = safe_first(
+        "SELECT 1 FROM blocks WHERE blocker_id=? AND blocked_id=?",
+        viewer["id"], target["id"],
+    )
+    if existing:
+        safe_execute("DELETE FROM blocks WHERE blocker_id=? AND blocked_id=?",
+                     viewer["id"], target["id"])
+        flash(f"Unblocked {target['display_name']}.", "success")
+    else:
+        safe_execute("INSERT OR IGNORE INTO blocks (blocker_id, blocked_id) VALUES (?, ?)",
+                     viewer["id"], target["id"])
+        # A block ends the relationship in both directions, the way G+'s did.
+        execute("DELETE FROM follows WHERE (follower_id=? AND followed_id=?)"
+                " OR (follower_id=? AND followed_id=?)",
+                viewer["id"], target["id"], target["id"], viewer["id"])
+        flash(f"Blocked {target['display_name']}. You will not see each other.", "success")
+    return redirect(url_for("profile", username=username))
+
+
+@app.route("/post/<int:post_id>/ripples")
+def ripples(post_id):
+    """Ripples: how one post travelled - +1s, reshares and the people behind them.
+
+    The original was an animation of the share graph; this is the same facts as
+    a readable page, which is what a small site can honestly support.
+    """
+    item = post_row(post_id)
+    if not item or not may_view(item):
+        abort(404)
+    return render_template(
+        "ripples.html", post=item, voters=voters_of(post_id, 1, 100),
+        dislikers=voters_of(post_id, -1, 100), shares=shares_of(post_id),
+        comments=comment_threads(post_id, session.get("user_db_id") or 0),
+    )
+
+
+@app.route("/hover/<username>")
+def hovercard(username):
+    """The little profile card G+ showed when a name was hovered."""
+    user = profile_user(username)
+    state = viewer_follow_state(user)
+    return render_template(
+        "_hovercard.html", user=user, socials=social_links_of(user), **state
+    )
+
+
+# Account data export --------------------------------------------------------------
+
+@app.route("/settings/export")
+@login_required
+def export_account():
+    """A Takeout-shaped download of everything this account wrote."""
+    user = current_user()
+    posts = safe_query("SELECT * FROM posts WHERE user_id=? ORDER BY id", user["id"])
+    comments = safe_query(
+        "SELECT comments.*, posts.title AS post_title FROM comments"
+        " JOIN posts ON posts.id = comments.post_id WHERE comments.user_id=?",
+        user["id"],
+    )
+    payload = {
+        "exported_at": utcnow().strftime(DB_TIME_FORMAT) + " UTC",
+        "account": {
+            "user_id": user.get("user_id"),
+            "username": user.get("username"),
+            "display_name": user.get("display_name"),
+            "nickname": user.get("nickname"),
+            "tagline": user.get("tagline"),
+            "bio": user.get("bio"),
+            "created_at": user.get("created_at"),
+        },
+        "posts": [
+            {**row, "images": [image["filename"] for image in post_image_rows(row["id"])]}
+            for row in posts
+        ],
+        "comments": comments,
+        "followers": [row["username"] for row in safe_query(
+            "SELECT users.username FROM follows JOIN users ON users.id=follows.follower_id"
+            " WHERE follows.followed_id=?", user["id"])],
+        "following": [row["username"] for row in safe_query(
+            "SELECT users.username FROM follows JOIN users ON users.id=follows.followed_id"
+            " WHERE follows.follower_id=?", user["id"])],
+        "circles": [
+            {**circle, "members": [person["username"]
+                                    for person in circle_member_rows(circle["id"])]}
+            for circle in circle_rows(user["id"])
+        ] if gplus_schema() else [],
+        "collections": collection_rows(user["id"], user["id"]),
+    }
+    body = json.dumps(payload, indent=2, default=str)
+    return Response(
+        body, mimetype="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{user["username"]}-google-plus-export.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+# Muting, notification preferences and email --------------------------------------
+
+@app.post("/profile/<username>/mute")
+@login_required
+def mute_user(username):
+    """Mute or unmute a person: their posts leave your streams, nothing else."""
+    if not gplus2_schema():
+        flash("Muting needs the newest database migration. Run `npm run db:remote`.", "error")
+        return redirect(url_for("profile", username=username))
+    target = profile_user(username)
+    viewer = current_user()
+    if target["id"] == viewer["id"]:
+        flash("You cannot mute yourself.", "error")
+        return redirect(url_for("profile", username=username))
+    if is_muted(viewer["id"], target["id"]):
+        safe_execute(
+            "DELETE FROM user_mutes WHERE muter_id=? AND muted_id=?",
+            viewer["id"], target["id"],
+        )
+        flash(f"Unmuted {target['display_name']}. Their posts are back in your streams.", "success")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO user_mutes (muter_id, muted_id) VALUES (?, ?)",
+            viewer["id"], target["id"],
+        )
+        flash(f"Muted {target['display_name']}. Their posts will not appear in your streams.", "success")
+    return redirect(safe_next(
+        request.form.get("next"), url_for("profile", username=username)
+    ))
+
+
+@app.route("/settings/notifications", methods=["GET", "POST"])
+@login_required
+def notification_settings():
+    """Per-kind notification switches, an optional digest address, muted people."""
+    if not gplus2_schema():
+        flash("Notification settings need the newest database migration. Run `npm run db:remote`.", "error")
+        return redirect(url_for("settings"))
+    user = current_user()
+    if request.method == "POST":
+        email = request.form.get("email", "").strip()
+        digest = 1 if request.form.get("email_digest") else 0
+        prefs = {
+            kind: bool(request.form.get("notify_" + kind))
+            for kind in NOTIFICATION_KINDS
+        }
+        if len(email) > MAX_EMAIL:
+            flash(f"An email address can be {MAX_EMAIL} characters or fewer.", "error")
+        elif email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            flash("That does not look like an email address.", "error")
+        else:
+            safe_execute(
+                "UPDATE users SET email=?, email_digest=?, notification_prefs=? WHERE id=?",
+                email or None, digest, json.dumps(prefs), user["id"],
+            )
+            flash("Notification settings saved.", "success")
+            return redirect(url_for("notification_settings"))
+    user = current_user()
+    return render_template(
+        "notification_settings.html",
+        prefs=notification_prefs(user),
+        kinds=NOTIFICATION_KINDS,
+        labels=NOTIFICATION_LABELS,
+        email_ready=email_configured(),
+        muted=muted_people(user["id"]),
+        max_email=MAX_EMAIL,
+    )
+
+
+@app.post("/admin/email/flush")
+@admin_required
+def admin_flush_email():
+    """Send the queued digest emails, in one batch, from the admin panel."""
+    sent, message = flush_emails()
+    flash(message, "success" if sent else "error")
+    return redirect(url_for("admin") + "#email")
+
+
+# Pages ----------------------------------------------------------------------------
+
+def page_post_count(page_id):
+    row = safe_first(
+        "SELECT COUNT(*) AS total FROM posts"
+        " WHERE page_id=? AND status='published'", page_id,
+    )
+    return int(row["total"]) if row else 0
+
+
+@app.route("/pages")
+def pages():
+    viewer = current_user()
+    return render_template(
+        "pages.html",
+        pages=page_rows(),
+        my_pages=pages_for(viewer["id"]) if viewer else [],
+        needs_migration=not gplus2_schema(),
+        max_name=MAX_PAGE_NAME,
+        max_tagline=MAX_PAGE_TAGLINE,
+        max_about=MAX_PAGE_ABOUT,
+    )
+
+
+@app.post("/pages/create")
+@login_required
+def create_page():
+    if not gplus2_schema():
+        flash("Pages need the newest database migration. Run `npm run db:remote`.", "error")
+        return redirect(url_for("pages"))
+    user = current_user()
+    name = request.form.get("name", "").strip()
+    slug = request.form.get("slug", "").strip().lower()
+    tagline = request.form.get("tagline", "").strip()
+    about = request.form.get("about", "").strip()
+    if not 1 <= len(name) <= MAX_PAGE_NAME:
+        flash(f"A page needs a name of 1-{MAX_PAGE_NAME} characters.", "error")
+        return redirect(url_for("pages"))
+    if not re.fullmatch(r"[a-z0-9-]{3,40}", slug):
+        flash("The page address can be 3-40 lowercase letters, numbers or hyphens.", "error")
+        return redirect(url_for("pages"))
+    if page_by_slug(slug):
+        flash("That page address is taken.", "error")
+        return redirect(url_for("pages"))
+    if len(tagline) > MAX_PAGE_TAGLINE or len(about) > MAX_PAGE_ABOUT:
+        flash("The tagline or About text is too long.", "error")
+        return redirect(url_for("pages"))
+    avatar, avatar_error = save_image_upload(request.files.get("avatar"))
+    banner, banner_error = save_image_upload(request.files.get("banner"))
+    if avatar_error or banner_error:
+        for stored in (avatar, banner):
+            delete_upload(stored)
+        flash(avatar_error or banner_error, "error")
+        return redirect(url_for("pages"))
+    execute(
+        "INSERT INTO pages (slug, name, tagline, about, avatar, banner, owner_id)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        slug, name, tagline or None, about or None, avatar, banner, user["id"],
+    )
+    created = first("SELECT last_insert_rowid() AS id")
+    if not created:
+        for stored in (avatar, banner):
+            delete_upload(stored)
+        flash("The page could not be created.", "error")
+        return redirect(url_for("pages"))
+    safe_execute(
+        "INSERT OR IGNORE INTO page_managers (page_id, user_id, role)"
+        " VALUES (?, ?, 'owner')",
+        created["id"], user["id"],
+    )
+    flash(f"Page \"{name}\" created.", "success")
+    return redirect(url_for("page_detail", slug=slug))
+
+
+@app.route("/pages/<slug>")
+def page_detail(slug):
+    if not gplus2_schema():
+        abort(404)
+    row = page_by_slug(slug)
+    if not row:
+        abort(404)
+    owner = first("SELECT * FROM users WHERE id=?", row["owner_id"])
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else 0
+    return render_template(
+        "page.html",
+        page=row,
+        owner=owner,
+        posts=page_posts(row, viewer_id),
+        managers=page_managers_rows(row["id"]),
+        can_manage=can_manage_page(row, viewer),
+        is_owner=bool(viewer and row["owner_id"] == viewer["id"]),
+        post_count=page_post_count(row["id"]),
+    )
+
+
+@app.route("/pages/<slug>/edit", methods=["GET", "POST"])
+@login_required
+def edit_page(slug):
+    if not gplus2_schema():
+        abort(404)
+    row = page_by_slug(slug)
+    if not row:
+        abort(404)
+    if not can_manage_page(row, current_user()):
+        flash("Only a page's managers can edit it.", "error")
+        return redirect(url_for("page_detail", slug=slug))
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        tagline = request.form.get("tagline", "").strip()
+        about = request.form.get("about", "").strip()
+        if not 1 <= len(name) <= MAX_PAGE_NAME:
+            flash(f"A page needs a name of 1-{MAX_PAGE_NAME} characters.", "error")
+        elif len(tagline) > MAX_PAGE_TAGLINE or len(about) > MAX_PAGE_ABOUT:
+            flash("The tagline or About text is too long.", "error")
+        else:
+            avatar, avatar_error = save_image_upload(request.files.get("avatar"))
+            banner, banner_error = save_image_upload(request.files.get("banner"))
+            if avatar_error or banner_error:
+                for stored in (avatar, banner):
+                    delete_upload(stored)
+                flash(avatar_error or banner_error, "error")
+            else:
+                fields = {"name": name, "tagline": tagline or None, "about": about or None}
+                removed = []
+                if avatar:
+                    fields["avatar"] = avatar
+                    removed.append(row["avatar"])
+                elif request.form.get("remove_avatar"):
+                    fields["avatar"] = None
+                    removed.append(row["avatar"])
+                if banner:
+                    fields["banner"] = banner
+                    removed.append(row["banner"])
+                elif request.form.get("remove_banner"):
+                    fields["banner"] = None
+                    removed.append(row["banner"])
+                assignments = ", ".join(f"{column}=?" for column in fields)
+                execute(
+                    f"UPDATE pages SET {assignments} WHERE id=?",
+                    *fields.values(), row["id"],
+                )
+                for filename in removed:
+                    delete_upload(filename)
+                flash("Page updated.", "success")
+                return redirect(url_for("page_detail", slug=row["slug"]))
+    return render_template(
+        "page_editor.html", page=row,
+        max_name=MAX_PAGE_NAME, max_tagline=MAX_PAGE_TAGLINE,
+        max_about=MAX_PAGE_ABOUT,
+    )
+
+
+@app.post("/pages/<slug>/delete")
+@login_required
+def delete_page(slug):
+    if not gplus2_schema():
+        abort(404)
+    row = page_by_slug(slug)
+    if not row:
+        abort(404)
+    if row["owner_id"] != current_user()["id"]:
+        flash("Only the page's owner can delete it.", "error")
+        return redirect(url_for("page_detail", slug=slug))
+    safe_execute("UPDATE posts SET page_id=NULL WHERE page_id=?", row["id"])
+    for filename in (row["avatar"], row["banner"]):
+        delete_upload(filename)
+    safe_execute("DELETE FROM pages WHERE id=?", row["id"])
+    flash(f"Deleted the page \"{row['name']}\". Its posts are still on their authors' profiles.", "success")
+    return redirect(url_for("pages"))
+
+
+@app.post("/pages/<slug>/managers")
+@login_required
+def add_page_manager(slug):
+    if not gplus2_schema():
+        abort(404)
+    row = page_by_slug(slug)
+    if not row:
+        abort(404)
+    if row["owner_id"] != current_user()["id"]:
+        flash("Only the page's owner can add managers.", "error")
+        return redirect(url_for("page_detail", slug=slug))
+    username = request.form.get("username", "").strip().lstrip("@")
+    person = first(
+        "SELECT id, display_name, deleted_at FROM users WHERE username=? COLLATE NOCASE",
+        username,
+    )
+    if not person or person.get("deleted_at"):
+        flash("There is no account by that name.", "error")
+    else:
+        safe_execute(
+            "INSERT OR IGNORE INTO page_managers (page_id, user_id, role)"
+            " VALUES (?, ?, 'manager')",
+            row["id"], person["id"],
+        )
+        flash(f"{person['display_name']} can now post as {row['name']}.", "success")
+    return redirect(url_for("page_detail", slug=slug))
+
+
+@app.post("/pages/<slug>/managers/<int:user_id>/remove")
+@login_required
+def remove_page_manager(slug, user_id):
+    if not gplus2_schema():
+        abort(404)
+    row = page_by_slug(slug)
+    if not row:
+        abort(404)
+    viewer = current_user()
+    if row["owner_id"] != viewer["id"] and user_id != viewer["id"]:
+        flash("Only the page's owner can remove managers.", "error")
+        return redirect(url_for("page_detail", slug=slug))
+    if user_id == row["owner_id"]:
+        flash("The owner cannot be removed from their own page.", "error")
+    else:
+        safe_execute(
+            "DELETE FROM page_managers WHERE page_id=? AND user_id=?",
+            row["id"], user_id,
+        )
+        flash("Manager removed.", "success")
+    return redirect(url_for("page_detail", slug=slug))
+
+
+# Albums --------------------------------------------------------------------------
+
+@app.post("/albums/create")
+@login_required
+def create_album():
+    if not gplus2_schema():
+        flash("Albums need the newest database migration. Run `npm run db:remote`.", "error")
+        return redirect(url_for("photos", username=current_user()["username"]))
+    user = current_user()
+    name = request.form.get("name", "").strip()
+    description = request.form.get("description", "").strip()
+    if not 1 <= len(name) <= MAX_ALBUM_NAME:
+        flash(f"An album needs a name of 1-{MAX_ALBUM_NAME} characters.", "error")
+    elif len(description) > MAX_ALBUM_DESCRIPTION:
+        flash("That album description is too long.", "error")
+    elif safe_first(
+        "SELECT 1 FROM albums WHERE user_id=? AND name=? COLLATE NOCASE",
+        user["id"], name,
+    ):
+        flash("You already have an album with that name.", "error")
+    else:
+        safe_execute(
+            "INSERT INTO albums (user_id, name, description) VALUES (?, ?, ?)",
+            user["id"], name, description or None,
+        )
+        flash(f"Album \"{name}\" created.", "success")
+    return redirect(url_for("photos", username=user["username"]))
+
+
+@app.route("/albums/<int:album_id>")
+def album(album_id):
+    if not gplus2_schema():
+        abort(404)
+    row = album_by_id(album_id)
+    if not row:
+        abort(404)
+    viewer = current_user()
+    viewer_id = viewer["id"] if viewer else 0
+    owner = first("SELECT * FROM users WHERE id=?", row["user_id"])
+    posts = album_posts(album_id)
+    if row["user_id"] != viewer_id and not posts:
+        abort(404)
+    return render_template(
+        "album.html", album=row, owner=owner, posts=posts,
+        is_owner=bool(viewer and row["user_id"] == viewer_id),
+    )
+
+
+@app.post("/albums/<int:album_id>/delete")
+@login_required
+def delete_album(album_id):
+    if not gplus2_schema():
+        abort(404)
+    row = album_by_id(album_id)
+    if not row:
+        abort(404)
+    if row["user_id"] != current_user()["id"]:
+        flash("You can only delete your own albums.", "error")
+        return redirect(url_for("album", album_id=album_id))
+    safe_execute("DELETE FROM albums WHERE id=?", album_id)
+    flash("Album deleted. Its posts are still on your profile.", "success")
+    return redirect(url_for("photos", username=current_user()["username"]))
+
+
+@app.post("/post/<int:post_id>/albums")
+@login_required
+def set_post_albums(post_id):
+    """Put one photo post in (or take it out of) the author's named albums."""
+    if not gplus2_schema():
+        abort(404)
+    item = post_row(post_id)
+    if not item:
+        abort(404)
+    user = current_user()
+    if not can_manage_post(item):
+        flash("You can only file your own posts into albums.", "error")
+        return redirect(post_path(post_id))
+    wanted = set()
+    for value in request.form.getlist("album_ids"):
+        if value.isdigit():
+            wanted.add(int(value))
+    owned = {row["id"] for row in albums_for(user["id"], user["id"])}
+    safe_execute("DELETE FROM album_posts WHERE post_id=?", post_id)
+    for album_id in wanted & owned:
+        safe_execute(
+            "INSERT OR IGNORE INTO album_posts (album_id, post_id) VALUES (?, ?)",
+            album_id, post_id,
+        )
+    flash("Albums updated.", "success")
+    return redirect(post_path(post_id))
+
+
+# Hangouts ------------------------------------------------------------------------
+
+def hangout_room_from_form():
+    return jitsi_room_name()
+
+
+@app.route("/hangouts")
+def hangouts():
+    return render_template(
+        "hangouts.html", hangouts=hangout_rows(),
+        needs_migration=not gplus2_schema(),
+        max_title=MAX_HANGOUT_TITLE,
+    )
+
+
+@app.post("/hangouts/create")
+@login_required
+def create_hangout():
+    if not gplus2_schema():
+        flash("Hangouts need the newest database migration. Run `npm run db:remote`.", "error")
+        return redirect(url_for("hangouts"))
+    title = request.form.get("title", "").strip()
+    kind = request.form.get("kind", "hangout")
+    if kind not in ("hangout", "onair"):
+        kind = "hangout"
+    youtube_url = request.form.get("youtube_url", "").strip()
+    if kind == "onair" and youtube_url and not youtube_id(youtube_url):
+        flash("That does not look like a YouTube link.", "error")
+        return redirect(url_for("hangouts"))
+    if not 1 <= len(title) <= MAX_HANGOUT_TITLE:
+        flash(f"Give the hangout a title of 1-{MAX_HANGOUT_TITLE} characters.", "error")
+        return redirect(url_for("hangouts"))
+    room = jitsi_room_name()
+    safe_execute(
+        "INSERT INTO hangouts (owner_id, title, room, kind, youtube_url)"
+        " VALUES (?, ?, ?, ?, ?)",
+        current_user()["id"], title, room, kind, youtube_url or None,
+    )
+    created = safe_first("SELECT id FROM hangouts WHERE room=?", room)
+    if not created:
+        flash("The hangout could not be created.", "error")
+        return redirect(url_for("hangouts"))
+    flash("Your hangout is live. Share the page or invite people from a profile.", "success")
+    return redirect(url_for("hangout", room=room))
+
+
+@app.route("/hangouts/<room>")
+def hangout(room):
+    if not gplus2_schema():
+        abort(404)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{6,80}", room or ""):
+        abort(404)
+    row = hangout_by_room(room)
+    if not row:
+        abort(404)
+    owner = first("SELECT * FROM users WHERE id=?", row["owner_id"])
+    viewer = current_user()
+    return render_template(
+        "hangout.html", hangout=row, owner=owner,
+        is_owner=bool(viewer and viewer["id"] == row["owner_id"]),
+        video_id=youtube_id(row.get("youtube_url")),
+        jitsi_url=f"https://meet.jit.si/{row['room']}",
+    )
+
+
+@app.post("/hangouts/<room>/end")
+@login_required
+def end_hangout(room):
+    if not gplus2_schema():
+        abort(404)
+    row = hangout_by_room(room)
+    if not row:
+        abort(404)
+    if row["owner_id"] != current_user()["id"]:
+        flash("Only the person who started it can end a hangout.", "error")
+        return redirect(url_for("hangout", room=room))
+    safe_execute(
+        "UPDATE hangouts SET ended_at=datetime('now') WHERE id=?", row["id"]
+    )
+    flash("The hangout has ended.", "success")
+    return redirect(url_for("hangouts"))
+
+
+# Sparks --------------------------------------------------------------------------
+
+@app.route("/sparks")
+def sparks():
+    return render_template(
+        "sparks.html", sparks=spark_rows(),
+        needs_migration=not gplus2_schema(),
+        max_name=MAX_SPARK_NAME, max_description=MAX_SPARK_DESCRIPTION,
+    )
+
+
+@app.post("/sparks/create")
+@login_required
+def create_spark():
+    if not gplus2_schema():
+        flash("Sparks need the newest database migration. Run `npm run db:remote`.", "error")
+        return redirect(url_for("sparks"))
+    name = request.form.get("name", "").strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40]
+    description = request.form.get("description", "").strip()
+    if not 1 <= len(name) <= MAX_SPARK_NAME:
+        flash(f"A spark needs a name of 1-{MAX_SPARK_NAME} characters.", "error")
+    elif not slug:
+        flash("Use at least one letter or number in the name.", "error")
+    elif spark_by_slug(slug):
+        flash("There is already a spark with that name.", "error")
+    elif len(description) > MAX_SPARK_DESCRIPTION:
+        flash("That description is too long.", "error")
+    else:
+        safe_execute(
+            "INSERT INTO sparks (name, slug, description, created_by) VALUES (?, ?, ?, ?)",
+            name, slug, description or None, current_user()["id"],
+        )
+        flash(f"Spark \"{name}\" created. Add the first link to it.", "success")
+        return redirect(url_for("spark", slug=slug))
+    return redirect(url_for("sparks"))
+
+
+@app.route("/sparks/<slug>")
+def spark(slug):
+    if not gplus2_schema():
+        abort(404)
+    row = spark_by_slug(slug)
+    if not row:
+        abort(404)
+    return render_template(
+        "spark.html", spark=row, links=spark_link_rows(row["id"]),
+        max_note=MAX_SPARK_NOTE,
+    )
+
+
+@app.post("/sparks/<slug>/add")
+@login_required
+def add_spark_link(slug):
+    if not gplus2_schema():
+        abort(404)
+    row = spark_by_slug(slug)
+    if not row:
+        abort(404)
+    url = request.form.get("url", "").strip()
+    note = request.form.get("note", "").strip()
+    if url and not url.lower().startswith(("http://", "https://")):
+        url = "https://" + url
+    if not is_public_url(url):
+        flash("Paste an http(s) address on a public website.", "error")
+    elif safe_first("SELECT 1 FROM spark_links WHERE spark_id=? AND url=?", row["id"], url):
+        flash("That link is already in this spark.", "error")
+    elif len(note) > MAX_SPARK_NOTE:
+        flash(f"A note can be {MAX_SPARK_NOTE} characters or fewer.", "error")
+    else:
+        ensure_link_preview(url)
+        safe_execute(
+            "INSERT INTO spark_links (spark_id, url, note, added_by) VALUES (?, ?, ?, ?)",
+            row["id"], url, note or None, current_user()["id"],
+        )
+        flash("Link added.", "success")
+    return redirect(url_for("spark", slug=slug))
+
+
+# Community roles and embeds ------------------------------------------------------
+
+@app.post("/c/<slug>/members/<int:user_id>/role")
+@login_required
+def community_member_role(slug, user_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row:
+        abort(404)
+    if row["owner_id"] != current_user()["id"]:
+        flash("Only the community owner can change roles.", "error")
+        return redirect(url_for("community", slug=slug))
+    role = request.form.get("role", "member")
+    if role not in ("moderator", "member"):
+        role = "member"
+    if user_id == row["owner_id"]:
+        flash("The owner's role cannot be changed.", "error")
+    else:
+        safe_execute(
+            "UPDATE community_members SET role=? WHERE community_id=? AND user_id=?",
+            role, row["id"], user_id,
+        )
+        flash("Role updated.", "success")
+    return redirect(url_for("community", slug=slug))
+
+
+@app.post("/c/<slug>/members/<int:user_id>/remove")
+@login_required
+def community_remove_member(slug, user_id):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row:
+        abort(404)
+    viewer = current_user()
+    membership = community_membership(row["id"], viewer["id"])
+    if not membership or membership["role"] not in ("owner", "moderator"):
+        flash("Only the owner or a moderator can remove members.", "error")
+        return redirect(url_for("community", slug=slug))
+    if user_id == row["owner_id"]:
+        flash("The owner cannot be removed.", "error")
+        return redirect(url_for("community", slug=slug))
+    target = community_membership(row["id"], user_id)
+    if not target:
+        flash("That account is not a member.", "error")
+    elif membership["role"] == "moderator" and target["role"] != "member":
+        flash("Moderators can only remove members.", "error")
+    else:
+        safe_execute(
+            "DELETE FROM community_members WHERE community_id=? AND user_id=?",
+            row["id"], user_id,
+        )
+        flash("Member removed.", "success")
+    return redirect(url_for("community", slug=slug))
+
+
+@app.post("/c/<slug>/delete")
+@login_required
+def delete_community(slug):
+    if not revival_ready():
+        return redirect(url_for("home"))
+    row = community_by_slug(slug)
+    if not row:
+        abort(404)
+    if row["owner_id"] != current_user()["id"]:
+        flash("Only the owner can delete a community.", "error")
+        return redirect(url_for("community", slug=slug))
+    safe_execute("UPDATE posts SET community_id=NULL WHERE community_id=?", row["id"])
+    safe_execute("DELETE FROM communities WHERE id=?", row["id"])
+    flash(f"Deleted the community \"{row['name']}\". Its posts are still on their authors' profiles.", "success")
+    return redirect(url_for("communities"))
+
+
+@app.route("/post/<int:post_id>/embed")
+def embed_post(post_id):
+    """A bare page for an <iframe>: the post, nothing around it."""
+    rows = fetch_posts("WHERE posts.id=?", (post_id,))
+    if not rows:
+        abort(404)
+    item = rows[0]
+    if not may_view(item):
+        abort(404)
+    return render_template(
+        "embed_post.html", post=item,
+        images=post_image_rows(item["id"]),
+        embed=embed_for(item.get("link_url")),
+    )
+
+
+# Admin: reports and verification ------------------------------------------------
+
+@app.post("/admin/reports/<int:report_id>/resolve")
+@admin_required
+def resolve_report(report_id):
+    if not revival_ready():
+        return redirect(url_for("admin"))
+    safe_execute(
+        "UPDATE reports SET resolved_at=datetime('now'), resolved_by=?"
+        " WHERE id=? AND resolved_at IS NULL",
+        actor_name(current_user()), report_id,
+    )
+    flash("Report closed.", "success")
+    return redirect(url_for("admin") + "#reports")
+
+
+@app.post("/admin/users/<int:user_id>/verify")
+@admin_required
+def verify_user(user_id):
+    """Toggle the G+ check mark on an account."""
+    if not revival_ready():
+        return redirect(url_for("admin"))
+    target = first("SELECT id, display_name FROM users WHERE id=?", user_id)
+    if not target:
+        abort(404)
+    safe_execute(
+        "UPDATE users SET verified=CASE WHEN verified=1 THEN 0 ELSE 1 END WHERE id=?",
+        user_id,
+    )
+    flash("Verification changed.", "success")
     return redirect(url_for("admin") + "#users")
 
 

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ spark.name }} · Sparks · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow"><a href="{{ url_for('sparks') }}">Sparks</a></p>
+  <h1>{{ spark.name }}</h1>
+  {% if spark.description %}<p>{{ spark.description }}</p>{% endif %}
+</div>
+
+{% if current_user %}
+  <section class="settings-card">
+    <h2>Add a link</h2>
+    <form method="post" action="{{ url_for('add_spark_link', slug=spark.slug) }}">
+      <div class="editor-row">
+        <label>Address
+          <input name="url" required placeholder="https://example.com/article">
+        </label>
+        <label>Note
+          <input name="note" maxlength="{{ max_note }}" placeholder="Optional">
+        </label>
+      </div>
+      <div class="actions"><button type="submit">Add to this spark</button></div>
+    </form>
+  </section>
+{% else %}
+  <div class="feed-cta">
+    <a class="button" href="{{ url_for('login', next=url_for('spark', slug=spark.slug)) }}">Sign in</a>
+    <span class="muted">to add a link.</span>
+  </div>
+{% endif %}
+
+{% for link in links %}
+  <article class="spark-link">
+    {% if link.image %}
+      <a class="spark-link-image" href="{{ link.url }}" target="_blank" rel="noopener noreferrer nofollow">
+        <img src="{{ link.image }}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">
+      </a>
+    {% endif %}
+    <div class="spark-link-main">
+      <a class="spark-link-title" href="{{ link.url }}" target="_blank" rel="noopener noreferrer nofollow">
+        {{ link.title or link.url }}
+      </a>
+      {% if link.description %}<p>{{ link.description }}</p>{% endif %}
+      {% if link.note %}<p class="spark-note">“{{ link.note }}”</p>{% endif %}
+      <small class="muted">{{ link.site or link.url }}
+        {% if link.added_by_name %} · added by <a href="{{ url_for('profile', username=link.added_by_username) }}">{{ link.added_by_name }}</a>{% endif %}
+        · {{ link.created_at[:16] }}</small>
+    </div>
+  </article>
+{% else %}
+  <div class="empty">No links in this spark yet.</div>
+{% endfor %}
+{% endblock %}

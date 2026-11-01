@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import person_row with context %}
+{% block title %}Find people · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Find people</h1>
+  <p>Accounts worth following, ordered by who already follows you and who the site
+    follows most. Google+ called this "Find people".</p>
+</div>
+
+<div class="section-label">Suggestions</div>
+{% for person in people %}
+  {{ person_row(person, person.i_follow, url_for('people')) }}
+{% else %}
+  <div class="empty">Nobody new to suggest yet.</div>
+{% endfor %}
+
+{% if following %}
+  <div class="section-label">People you follow</div>
+  {% for person in following %}
+    {{ person_row(person, true, url_for('people')) }}
+  {% endfor %}
+{% endif %}
+{% endblock %}

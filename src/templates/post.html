@@ -10,46 +10,104 @@
       {# Deleted accounts keep their comments, with no profile to open and no
          released handle to show. #}
       {% if comment.author_deleted %}<strong>{{ comment.display_name }}</strong>
-      {% else %}<a href="{{ url_for('profile', username=comment.username) }}"><strong>{{ comment.display_name }}</strong></a>
-      <span>@{{ comment.username }} · {{ comment.created_at }}</span>{% endif %}
+      {% else %}<a class="hover-name" href="{{ url_for('profile', username=comment.username) }}"
+                  data-hovercard="{{ url_for('hovercard', username=comment.username) }}"><strong>{{ comment.display_name }}</strong></a>
+      <span>@{{ comment.username }} · <a class="post-stamp" href="{{ post_url(post) }}#comment-{{ comment.id }}">{{ comment.created_at }}</a></span>{% endif %}
     </div>
     <p>{{ comment.content|linkify }}</p>
-    {% if viewer and not my_bans.comment %}
-      <details class="reply-box">
-        <summary>Reply</summary>
-        <form class="comment-form compact" method="post">
-          <input type="hidden" name="parent_id" value="{{ comment.id }}">
-          <div class="comment-inputs">
-            <textarea name="content" maxlength="2000" rows="2"
-                      placeholder="Reply to {{ comment.display_name }}..." required></textarea>
-            <button type="submit">Reply</button>
-          </div>
+    <div class="comment-actions">
+      {% if viewer %}
+        <form class="comment-vote" method="post" action="{{ url_for('vote_comment', comment_id=comment.id) }}">
+          <button class="vote{% if comment.my_vote %} active{% endif %}" type="submit"
+                  title="{{ 'Take back your +1' if comment.my_vote else 'Give this comment a +1' }}">▲
+            <span>{{ comment.score or 0 }}</span></button>
         </form>
-      </details>
-    {% endif %}
+      {% elif comment.score %}
+        <span class="comment-score">▲ {{ comment.score }}</span>
+      {% endif %}
+      {% if viewer and not post.locked %}
+        <details class="reply-box">
+          <summary>Reply</summary>
+          <form class="comment-form compact" method="post">
+            <input type="hidden" name="parent_id" value="{{ comment.id }}">
+            <div class="comment-inputs">
+              <textarea name="content" maxlength="2000" rows="2"
+                        placeholder="Reply to {{ comment.display_name }}..." required></textarea>
+              <button type="submit">Reply</button>
+            </div>
+          </form>
+        </details>
+      {% endif %}
+      {% if viewer and viewer.id == comment.author_id %}
+        <details class="edit-box">
+          <summary>Edit</summary>
+          <form class="comment-form compact" method="post" action="{{ url_for('edit_comment', comment_id=comment.id) }}">
+            <div class="comment-inputs">
+              <textarea name="content" maxlength="2000" rows="2" required>{{ comment.content }}</textarea>
+              <button type="submit">Save</button>
+            </div>
+          </form>
+        </details>
+      {% endif %}
+      {% if viewer and (viewer.id == comment.author_id or can_manage) %}
+        <form method="post" action="{{ url_for('remove_comment', comment_id=comment.id) }}"
+              onsubmit="return confirm('Delete this comment?')">
+          <button class="link-button danger" type="submit">Delete</button>
+        </form>
+      {% endif %}
+      {% if viewer and viewer.id != comment.author_id %}
+        <details class="report-box">
+          <summary>Report</summary>
+          <form method="post" action="{{ url_for('report_comment', comment_id=comment.id) }}">
+            <input name="reason" maxlength="500" placeholder="What is wrong with it?" required>
+            <button type="submit">Send report</button>
+          </form>
+        </details>
+      {% endif %}
+    </div>
   </div>
 </div>
 {% if comment.replies %}
-<div class="comment-replies">
-  {% for reply in comment.replies %}{{ comment_block(reply, viewer) }}{% endfor %}
-</div>
+  {% if comment.replies|length > 3 %}
+    <details class="comment-replies collapsed-replies">
+      <summary>View {{ comment.replies|length }} replies</summary>
+      {% for reply in comment.replies %}{{ comment_block(reply, viewer) }}{% endfor %}
+    </details>
+  {% else %}
+    <div class="comment-replies">
+      {% for reply in comment.replies %}{{ comment_block(reply, viewer) }}{% endfor %}
+    </div>
+  {% endif %}
 {% endif %}
 {% endmacro %}
 
 {% block content %}
-<article class="post-card full-post">
+<article class="post-card full-post" id="post-{{ post.id }}">
   <div class="post-head">
     {% if post.author_username %}
-      {{ avatar(post.author_picture, post.author_display_name) }}
+      {% if post.page_name %}
+        {{ avatar(post.page_avatar, post.page_name) }}
+      {% else %}
+        {{ avatar(post.author_picture, post.author_display_name) }}
+      {% endif %}
       <div class="post-author">
-        <strong>{% if post.author_deleted %}{{ post.author_display_name }}{% else %}<a href="{{ url_for('profile', username=post.author_username) }}">{{ post.author_display_name }}</a>{% endif %}</strong>
-        <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}{% if post.status != 'published' %} · {{ post.status }}{% endif %}</span>
+        <strong>{% if post.page_name %}<a href="{{ url_for('page_detail', slug=post.page_slug) }}">{{ post.page_name }}</a><span class="page-as"> · Page</span>{% elif post.author_deleted %}{{ post.author_display_name }}{% else %}<a class="hover-name" href="{{ url_for('profile', username=post.author_username) }}" data-hovercard="{{ url_for('hovercard', username=post.author_username) }}">{{ post.author_display_name }}</a>{% endif %}</strong>
+        <span>
+          {{ category_badge(post) }}
+          {%- if post.audience and post.audience != 'public' %}
+            <span class="badge badge-limited" title="The audience this was shared with">🔒 {{ audience_name }}</span>
+          {%- endif %}
+          {%- if my_circle %}<span class="badge badge-circle">◎ {{ my_circle.name }}</span>{% endif %}
+          {%- if post.pinned %}<span class="badge badge-pinned">Pinned</span>{% endif %}
+          · <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }} UTC</a>
+          {% if post.status != 'published' %} · {{ post.status }}{% endif %}
+        </span>
       </div>
     {% else %}
       <div class="avatar site-avatar">BM</div>
       <div class="post-author">
         <strong>Systematics Black Midi site</strong>
-        <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}</span>
+        <span>{{ category_badge(post) }} · <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }}</a></span>
       </div>
     {% endif %}
     {% if can_manage %}
@@ -62,12 +120,138 @@
       </div>
     {% endif %}
   </div>
+
+  {% if share_target %}
+    {# A share is a post about another post; the original is quoted, not copied. #}
+    <a class="quoted-post" href="{{ post_url(share_target) }}">
+      <span class="quoted-by">{{ share_target.author_display_name or 'Systematics Black Midi site' }} wrote</span>
+      <strong>{{ share_target.title }}</strong>
+      <span class="quoted-body">{{ share_target.content|striptags|truncate(220) }}</span>
+    </a>
+  {% endif %}
+
   <div class="post-body">
     <h1>{{ post.title }}</h1>
-    <div class="post-content">{{ post.content|linkify(created_at=post.created_at) }}</div>
+    {% if post.share_of and not post.content %}
+      <p class="muted">Shared without a note.</p>
+    {% endif %}
+    {% if post.content_warning %}
+      <details class="content-warning">
+        <summary>⚠ {{ post.content_warning }} <span class="muted">(click to show)</span></summary>
+        <div class="post-content">{{ post.content|linkify(created_at=post.created_at) }}</div>
+      </details>
+    {% elif post.content %}
+      <div class="post-content">{{ post.content|linkify(created_at=post.created_at) }}</div>
+    {% endif %}
+
+    {% if images %}
+      <div class="post-gallery" data-lightbox-group="post-{{ post.id }}">
+        {% for image in images %}
+          <a class="gallery-item" href="{{ url_for('uploads', filename=image.filename) }}"
+             data-lightbox="post-{{ post.id }}">
+            <img src="{{ url_for('uploads', filename=image.filename) }}" alt="" loading="lazy">
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% if people %}
+      <p class="tagged-people">With
+        {% for person in people %}<a class="hover-name" href="{{ url_for('profile', username=person.username) }}"
+          data-hovercard="{{ url_for('hovercard', username=person.username) }}">@{{ person.username }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+      </p>
+    {% endif %}
+
     {{ link_card(post) }}
+    {% if embed %}
+      <div class="media-embed media-{{ embed.kind }}">
+        <iframe src="{{ embed.src }}" loading="lazy" allowfullscreen
+                {% if embed.kind == 'soundcloud' %}height="166"{% endif %}
+                title="Embedded media"></iframe>
+      </div>
+    {% endif %}
   </div>
+
   {{ vote_bar(post) }}
+
+  <div class="post-actions">
+    {% if can_manage %}
+      <form method="post" action="{{ url_for('pin_post', post_id=post.id) }}">
+        <button class="link-button" type="submit">{{ 'Unpin' if post.pinned else 'Pin to profile' }}</button>
+      </form>
+      <form method="post" action="{{ url_for('lock_post', post_id=post.id) }}">
+        <button class="link-button" type="submit">{{ 'Unlock comments' if post.locked else 'Lock comments' }}</button>
+      </form>
+    {% endif %}
+    <a class="link-button" href="{{ url_for('ripples', post_id=post.id) }}">Ripples</a>
+    <details class="embed-box">
+      <summary>Embed</summary>
+      <p class="muted">Paste this where HTML is allowed to show the post on another site.</p>
+      <textarea readonly rows="3" onclick="this.select()">&lt;iframe src="{{ embed_url }}" width="600" height="700" style="border:1px solid #e0e0e0;max-width:100%" loading="lazy"&gt;&lt;/iframe&gt;</textarea>
+      <p class="muted"><a href="{{ embed_url }}" target="_blank" rel="noopener">Open the embed on its own</a></p>
+    </details>
+    {% if current_user %}
+      <form method="post" action="{{ url_for('mute_post', post_id=post.id) }}">
+        <button class="link-button" type="submit">Mute notifications</button>
+      </form>
+      {% if current_user.id != post.user_id %}
+        <details class="report-box">
+          <summary>Report</summary>
+          <form method="post" action="{{ url_for('report_post', post_id=post.id) }}">
+            <input name="reason" maxlength="500" placeholder="What is wrong with this post?" required>
+            <button type="submit">Send report</button>
+          </form>
+        </details>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  {% if can_manage and albums %}
+    <details class="album-box">
+      <summary>Albums</summary>
+      <form method="post" action="{{ url_for('set_post_albums', post_id=post.id) }}">
+        {% for item in albums %}
+          <label class="pref-row">
+            <input type="checkbox" name="album_ids" value="{{ item.id }}"
+                   {% if item.id in post_albums %}checked{% endif %}> {{ item.name }}
+          </label>
+        {% endfor %}
+        <button type="submit">Save albums</button>
+      </form>
+    </details>
+  {% endif %}
+
+  {% if current_user and not post.locked %}
+    <details class="share-box" id="share">
+      <summary>Share this post</summary>
+      <form method="post" action="{{ url_for('share_post', post_id=post.id) }}">
+        <textarea name="body" maxlength="1000" rows="3"
+                  placeholder="Add a note (or share it as it is)..."></textarea>
+        <label class="inline-label">Who can see it
+          <select name="audience">
+            <option value="public">Public</option>
+            <option value="private">Only me</option>
+          </select>
+        </label>
+        <button type="submit">Share to my stream</button>
+      </form>
+    </details>
+  {% elif post.locked %}
+    <p class="muted locked-note">🔒 The author has locked this post. It cannot be commented on or shared.</p>
+  {% endif %}
+
+  {% if voters %}
+    <details class="voters">
+      <summary>{{ voters|length }} +1{% if voters|length != 1 %}s{% endif %}</summary>
+      <div class="voter-list">
+        {% for voter in voters %}
+          <a class="voter" href="{{ url_for('profile', username=voter.username) }}">
+            {{ small_avatar(voter.profile_picture, voter.display_name) }}
+            <span>{{ voter.display_name }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
 
   <section id="comments" class="comments">
     <h3>{{ post.comment_count }} comment{% if post.comment_count != 1 %}s{% endif %}</h3>
@@ -78,7 +262,9 @@
     {% endfor %}
 
     {% if current_user %}
-      {% if my_bans.comment %}
+      {% if post.locked %}
+        <div class="login-to-comment banned">The author has locked this post, so no new comments can be added.</div>
+      {% elif my_bans.comment %}
         <div class="login-to-comment banned">{{ ban_message('comment', my_bans.comment) }}</div>
       {% else %}
       <form class="comment-form" method="post">

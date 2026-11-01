@@ -1,0 +1,31 @@
+<div class="hovercard-inner">
+  <div class="hovercard-head">
+    {% if user.profile_picture %}
+      <img class="hovercard-avatar avatar-img" src="{{ url_for('uploads', filename=user.profile_picture) }}" alt="">
+    {% else %}
+      <div class="hovercard-avatar">{{ user.display_name[:1]|upper }}</div>
+    {% endif %}
+    <div>
+      <strong>{{ user.display_name }}{% if user.verified %} <span class="verified">✔</span>{% endif %}</strong>
+      <span class="muted">@{{ user.username }}</span>
+      {% if user.tagline %}<span class="hovercard-tagline">{{ user.tagline }}</span>{% endif %}
+    </div>
+  </div>
+  {% if user.bio %}<p class="hovercard-bio">{{ user.bio|linkify(120) }}</p>{% endif %}
+  <div class="hovercard-stats">
+    <span><strong>{{ followers }}</strong> follower{% if followers != 1 %}s{% endif %}</span>
+    <span><strong>{{ following }}</strong> following</span>
+  </div>
+  <div class="hovercard-actions">
+    {% if not is_self %}
+      <form method="post" action="{{ url_for('follow', username=user.username) }}">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button class="button small{% if is_following %} secondary{% endif %}" type="submit">
+          {{ 'Following' if is_following else 'Follow' }}</button>
+      </form>
+      <a class="button small secondary" href="{{ url_for('profile', username=user.username) }}">Profile</a>
+    {% else %}
+      <a class="button small" href="{{ url_for('profile', username=user.username) }}">My profile</a>
+    {% endif %}
+  </div>
+</div>

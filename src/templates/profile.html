@@ -8,7 +8,8 @@
 <div class="profile-card">
   <div class="profile-cover">
     {% if user.banner %}
-      <img class="profile-banner" src="{{ url_for('uploads', filename=user.banner) }}" alt="">
+      <img class="profile-banner" src="{{ url_for('uploads', filename=user.banner) }}" alt=""
+           style="object-position: center {{ user.cover_position or 'center' }};">
     {% endif %}
   </div>
   <div class="profile-info">
@@ -19,8 +20,12 @@
     {% endif %}
     <div class="profile-name-row">
       <div>
-        <h1>{{ user.display_name }}</h1>
-        <div class="username">@{{ user.username }}</div>
+        <h1>{{ user.display_name }}
+          {% if user.verified %}<span class="verified" title="Verified account">✔</span>{% endif %}
+          {% if in_circle %}<span class="badge badge-circle" title="In one of your circles">◎ {{ in_circle.name }}</span>{% endif %}
+        </h1>
+        <div class="username">@{{ user.username }}{% if user.nickname %} · <span class="nickname">{{ user.nickname }}</span>{% endif %}</div>
+        {% if user.tagline %}<p class="profile-tagline">{{ user.tagline }}</p>{% endif %}
       </div>
       <div class="profile-actions">
         {% if is_self %}
@@ -28,6 +33,16 @@
         {% else %}
           {{ follow_button(user, is_following, url_for('profile', username=user.username)) }}
           {{ message_button(user, url_for('profile', username=user.username)) }}
+          {% if current_user and gplus %}
+            <form method="post" action="{{ url_for('mute_user', username=user.username) }}">
+              <input type="hidden" name="next" value="{{ url_for('profile', username=user.username) }}">
+              <button class="link-button" type="submit">{{ 'Unmute' if muted else 'Mute' }}</button>
+            </form>
+            <form method="post" action="{{ url_for('block_user', username=user.username) }}"
+                  onsubmit="return confirm('{{ 'Unblock' if blocked else 'Block' }} {{ user.display_name }}?')">
+              <button class="link-button danger" type="submit">{{ 'Unblock' if blocked else 'Block' }}</button>
+            </form>
+          {% endif %}
         {% endif %}
       </div>
     </div>
@@ -44,9 +59,47 @@
       <a href="{{ url_for('following', username=user.username) }}">
         <strong>{{ following }}</strong> following
       </a>
+      {% if gplus and photo_total %}
+        <a href="{{ url_for('photos', username=user.username) }}">
+          <strong>{{ photo_total }}</strong> photo{% if photo_total != 1 %}s{% endif %}
+        </a>
+      {% endif %}
     </div>
   </div>
 </div>
+
+{% if gplus and collections %}
+  <div class="section-label">Collections</div>
+  <div class="collection-strip">
+    {% for collection in collections %}
+      <a class="collection-card" href="{{ url_for('collection', collection_id=collection.id) }}">
+        <span class="collection-name">{{ collection.name }}</span>
+        <span class="collection-count">{{ collection.post_count }} post{% if collection.post_count != 1 %}s{% endif %}</span>
+      </a>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if gplus and albums %}
+  <div class="section-label">Albums</div>
+  <div class="collection-strip">
+    {% for item in albums %}
+      <a class="collection-card" href="{{ url_for('album', album_id=item.id) }}">
+        <span class="collection-name">{{ item.name }}</span>
+        <span class="collection-count">{{ item.post_count }} post{% if item.post_count != 1 %}s{% endif %}</span>
+      </a>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% if gplus and photo_total %}
+  <div class="section-label">Photos</div>
+  <div class="profile-photo-strip">
+    <a class="photos-more" href="{{ url_for('photos', username=user.username) }}">
+      See all {{ photo_total }} photo{% if photo_total != 1 %}s{% endif %} →
+    </a>
+  </div>
+{% endif %}
 
 <div class="people-grid">
   <section class="people-card">
@@ -85,6 +138,29 @@
   {% else %}
     <p class="muted">No bio yet.{% if is_self %} <a href="{{ url_for('profile_settings') }}">Add one</a> to introduce yourself.{% endif %}</p>
   {% endif %}
+
+  {% set facts = [
+    ('Work', user.about_work), ('Education', user.about_education),
+    ('Places lived', user.about_places), ('Relationship', user.about_relationship),
+    ('Birthday', user.about_birthday), ('Gender', user.about_gender),
+    ('Contact', user.about_contact)
+  ] %}
+  {% if user.about_work or user.about_education or user.about_places or
+        user.about_relationship or user.about_birthday or user.about_gender or
+        user.about_contact %}
+    <dl class="about-facts">
+      {% for label, value in facts if value %}
+        <dt>{{ label }}</dt><dd>{{ value }}</dd>
+      {% endfor %}
+    </dl>
+  {% endif %}
+  {% if user.bragging_rights %}
+    <div class="bragging-rights">
+      <h3>Bragging rights</h3>
+      <p>{{ user.bragging_rights }}</p>
+    </div>
+  {% endif %}
+
   {% if socials %}
     <div class="about-links">
       <h3>Links</h3>

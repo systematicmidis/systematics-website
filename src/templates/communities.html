@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Communities · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Communities</h1>
+  <p>Spaces with their own stream and members, the way a Google+ community worked.</p>
+</div>
+
+{% if needs_migration %}
+  <div class="empty">Communities need the newest database migration. Run
+    <code>npm run db:remote</code> and reload.</div>
+{% else %}
+  {% if current_user %}
+    <details class="create-panel">
+      <summary>Start a community</summary>
+      <form class="inline-form stacked" method="post" action="{{ url_for('create_community') }}">
+        <input name="name" maxlength="{{ max_name }}" placeholder="Community name" required>
+        <input name="slug" maxlength="40" placeholder="Address, e.g. black-midi" required pattern="[a-z0-9-]{3,40}">
+        <input name="description" maxlength="{{ max_description }}" placeholder="What is it for? (optional)">
+        <button type="submit">Create community</button>
+      </form>
+    </details>
+  {% endif %}
+
+  <div class="community-grid">
+    {% for community in communities %}
+      <a class="community-card" href="{{ url_for('community', slug=community.slug) }}">
+        <span class="community-badge">c/</span>
+        <strong>{{ community.name }}</strong>
+        {% if community.description %}<span class="community-desc">{{ community.description }}</span>{% endif %}
+        <span class="community-meta">{{ community.member_count }} member{% if community.member_count != 1 %}s{% endif %}
+          · {{ community.post_count }} post{% if community.post_count != 1 %}s{% endif %}</span>
+        {% if community.my_role %}<span class="badge badge-joined">{{ community.my_role }}</span>{% endif %}
+      </a>
+    {% else %}
+      <p class="muted">No communities yet.</p>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

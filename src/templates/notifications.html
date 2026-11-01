@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import small_avatar with context %}
+{% block title %}Notifications · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Notifications</h1>
+  <p>{{ notifications|length }} recent thing{% if notifications|length != 1 %}s{% endif %} on your posts,
+    comments and profile.</p>
+</div>
+
+{% if notifications %}
+  <form class="messages-tools" method="post" action="{{ url_for('read_notifications') }}">
+    <button type="submit">Mark all read</button>
+  </form>
+{% endif %}
+
+<section class="notification-list">
+  {% for row in notifications %}
+    <a class="notification-row{% if not row.read_at %} is-unread{% endif %}"
+       href="{{ notification_url(row) }}">
+      {% if row.actor_picture %}
+        <img class="small-avatar avatar-img" src="{{ url_for('uploads', filename=row.actor_picture) }}" alt="">
+      {% elif row.actor_deleted %}
+        <span class="small-avatar">✕</span>
+      {% else %}
+        <span class="small-avatar">{{ (row.actor_display_name or '?')[:1]|upper }}</span>
+      {% endif %}
+      <span class="notification-main">
+        <span class="notification-text">{{ notification_text(row) }}</span>
+        {% if row.post_title %}<span class="notification-post">{{ row.post_title }}</span>{% endif %}
+        {% if row.comment_content %}<span class="notification-excerpt">"{{ row.comment_content|striptags|truncate(100) }}"</span>{% endif %}
+      </span>
+      <span class="message-when">{{ (row.created_at or '')[:16] }}</span>
+      {% if not row.read_at %}<span class="badge badge-new">new</span>{% endif %}
+    </a>
+  {% else %}
+    <div class="empty">Nothing yet. When somebody +1s, comments on, mentions or shares
+      your posts, it lands here.</div>
+  {% endfor %}
+</section>
+{% endblock %}

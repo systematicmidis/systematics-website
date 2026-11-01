@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Sparks · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Sparks</h1>
+  <p>Interest feeds: one topic, a stream of outside links people add to it. Google+
+    used Sparks to follow a subject rather than a person.</p>
+</div>
+
+{% if needs_migration %}
+  <div class="flash error">Sparks need the newest database migration. Run
+    <code>npm run db:remote</code> and reload.</div>
+{% else %}
+  {% if current_user %}
+    <section class="settings-card">
+      <h2>Create a spark</h2>
+      <form method="post" action="{{ url_for('create_spark') }}">
+        <div class="editor-row">
+          <label>Name
+            <input name="name" maxlength="{{ max_name }}" required placeholder="Black MIDI">
+          </label>
+          <label>Description
+            <input name="description" maxlength="{{ max_description }}" placeholder="Optional">
+          </label>
+        </div>
+        <div class="actions"><button type="submit">Create spark</button></div>
+      </form>
+    </section>
+  {% endif %}
+
+  <div class="section-label">All sparks</div>
+  {% for item in sparks %}
+    <a class="admin-row spark-row" href="{{ url_for('spark', slug=item.slug) }}">
+      <span class="spark-mark" aria-hidden="true">✧</span>
+      <div class="account-main">
+        <strong>{{ item.name }}</strong>
+        <small>{{ item.link_count }} link{% if item.link_count != 1 %}s{% endif %}{% if item.description %} · {{ item.description }}{% endif %}</small>
+      </div>
+      <div class="actions"><span>Open →</span></div>
+    </a>
+  {% else %}
+    <div class="empty">No sparks yet. Create the first topic.</div>
+  {% endfor %}
+{% endif %}
+{% endblock %}

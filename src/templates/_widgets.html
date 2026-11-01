@@ -112,7 +112,7 @@
   {{ avatar(person.profile_picture, person.display_name) }}
   <div class="person-main">
     <a href="{{ url_for('profile', username=person.username) }}"><strong>{{ person.display_name }}</strong></a>
-    <span class="person-meta">{% if not person.deleted_at %}@{{ person.username }} · {% endif %}{{ person.follower_count }} follower{% if person.follower_count != 1 %}s{% endif %} · {{ person.post_count }} post{% if person.post_count != 1 %}s{% endif %}</span>
+    <span class="person-meta">{% if not person.deleted_at %}@{{ person.username }} · {% endif %}{{ person.follower_count or 0 }} follower{% if person.follower_count != 1 %}s{% endif %}{% if person.post_count is defined %} · {{ person.post_count }} post{% if person.post_count != 1 %}s{% endif %}{% endif %}</span>
     {% if person.bio %}<p class="person-bio">{{ person.bio|linkify(160) }}{% if person.bio|length > 160 %}…{% endif %}</p>{% endif %}
   </div>
   {{ follow_button(person, following, next_url) }}
@@ -122,20 +122,34 @@
 {# One post as it appears in a stream: author head, body, link card and vote bar.
    Shared by the home feed and profiles so a profile's stream looks like the feed. #}
 {% macro post_card(post) -%}
-<article class="post-card">
+<article class="post-card{% if post.pinned %} is-pinned{% endif %}" id="post-{{ post.id }}">
   <div class="post-head">
     {% if post.author_username %}
-      {{ avatar(post.author_picture, post.author_display_name) }}
+      {% if post.page_name %}
+        {{ avatar(post.page_avatar, post.page_name) }}
+      {% else %}
+        {{ avatar(post.author_picture, post.author_display_name) }}
+      {% endif %}
       <div class="post-author">
-        {# A deleted account keeps its posts but has no profile left to open. #}
-        <strong>{% if post.author_deleted %}{{ post.author_display_name }}{% else %}<a href="{{ url_for('profile', username=post.author_username) }}">{{ post.author_display_name }}</a>{% endif %}</strong>
-        <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}{% if post.status != 'published' %} · {{ post.status }}{% endif %}</span>
+        {# A deleted account keeps its posts but has no profile left to open. A
+           page post shows the page, not the person managing it. #}
+        <strong>{% if post.page_name %}<a href="{{ url_for('page_detail', slug=post.page_slug) }}">{{ post.page_name }}</a><span class="page-as"> · Page</span>{% elif post.author_deleted %}{{ post.author_display_name }}{% else %}<a class="hover-name" href="{{ url_for('profile', username=post.author_username) }}" data-hovercard="{{ url_for('hovercard', username=post.author_username) }}">{{ post.author_display_name }}</a>{% endif %}</strong>
+        <span>
+          {{ category_badge(post) }}
+          {%- if post.audience and post.audience != 'public' %}
+            <span class="badge badge-limited" title="Shared with a limited audience">🔒 Limited</span>
+          {%- endif %}
+          {%- if post.pinned %} <span class="badge badge-pinned">Pinned</span>{% endif %}
+          {%- if post.locked %} <span class="badge badge-locked">Locked</span>{% endif %}
+          · <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }}</a>
+          {% if post.status != 'published' %} · {{ post.status }}{% endif %}
+        </span>
       </div>
     {% else %}
       <div class="avatar site-avatar">BM</div>
       <div class="post-author">
         <strong>Systematics Black Midi site</strong>
-        <span>{{ category_badge(post) }} · {{ post.created_at[:10] }}</span>
+        <span>{{ category_badge(post) }} · <a class="post-stamp" href="{{ post_url(post) }}">{{ post.created_at[:16] }}</a></span>
       </div>
     {% endif %}
     {% if is_admin or (current_user and post.user_id and post.user_id == current_user.id) %}
@@ -143,10 +157,31 @@
     {% endif %}
   </div>
   <div class="post-body">
-    <h2><a href="{{ post_url(post) }}">{{ post.title }}</a></h2>
-    <p>{{ post.content|linkify(500, created_at=post.created_at) }}{% if post.content|length > 500 %}…{% endif %}</p>
-    {{ link_card(post, compact=true) }}
-    {% if post.content|length > 500 %}<a class="post-link" href="{{ post_url(post) }}">Read more</a>{% endif %}
+    {% if post.share_of %}
+      {# A reshare quotes the post it came from - it does not copy it, so an
+         edit or a deletion of the original is reflected here too. #}
+      {% if post.content %}<p class="share-note">{{ post.content|linkify(500, created_at=post.created_at) }}</p>{% endif %}
+      {% if post.shared_title %}
+        <a class="quoted-post" href="{{ url_for('post', public_id=post.shared_public_id) }}">
+          <span class="quoted-by">{{ post.shared_author_name or 'Systematics Black Midi site' }} shared</span>
+          <strong>{{ post.shared_title }}</strong>
+          <span class="quoted-body">{{ post.shared_content|striptags|truncate(180) }}</span>
+        </a>
+      {% else %}
+        <p class="muted">The original post is no longer available.</p>
+      {% endif %}
+    {% else %}
+      <h2><a href="{{ post_url(post) }}">{{ post.title }}</a></h2>
+      <p>{{ post.content|linkify(500, created_at=post.created_at) }}{% if post.content|length > 500 %}…{% endif %}</p>
+      {% if post.cover_image %}
+        <a class="post-cover" href="{{ post_url(post) }}">
+          <img src="{{ url_for('uploads', filename=post.cover_image) }}" alt="" loading="lazy">
+          {% if post.photo_count > 1 %}<span class="photo-stack">+{{ post.photo_count - 1 }}</span>{% endif %}
+        </a>
+      {% endif %}
+      {{ link_card(post, compact=true) }}
+      {% if post.content|length > 500 %}<a class="post-link" href="{{ post_url(post) }}">Read more</a>{% endif %}
+    {% endif %}
   </div>
   {{ vote_bar(post) }}
 </article>
@@ -174,5 +209,10 @@
   {% endif %}
   <a class="comment-link" href="{{ post_url(post) }}#comments">💬
     {{ post.comment_count }} comment{% if post.comment_count != 1 %}s{% endif %}</a>
+  {% if post.share_count %}
+    <a class="ripple-link" href="{{ url_for('ripples', post_id=post.id) }}"
+       title="Who shared this">↻ {{ post.share_count }}</a>
+  {% endif %}
+  <a class="ripple-link" href="{{ post_url(post) }}#share">Share</a>
 </div>
 {%- endmacro %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import post_card, small_avatar with context %}
+{% block title %}c/{{ community.slug }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="community-header">
+  <div class="community-title">
+    <span class="community-badge">c/</span>
+    <div>
+      <h1>{{ community.name }}</h1>
+      <p class="muted">Started by <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a>
+        · {{ members|length }} member{% if members|length != 1 %}s{% endif %}</p>
+    </div>
+  </div>
+  {% if current_user %}
+    {% if membership %}
+      <form method="post" action="{{ url_for('leave_community', slug=community.slug) }}">
+        <button class="button secondary" type="submit">{{ 'Leave' if membership.role != 'owner' else 'You own this' }}</button>
+      </form>
+    {% else %}
+      <form method="post" action="{{ url_for('join_community', slug=community.slug) }}">
+        <button class="button" type="submit">Join community</button>
+      </form>
+    {% endif %}
+  {% endif %}
+</div>
+
+{% if community.description %}<p class="community-about">{{ community.description }}</p>{% endif %}
+
+{% if membership %}
+  <div class="feed-cta"><a class="button" href="{{ url_for('new_post') }}">＋ Post in this community</a>
+    <span class="muted">Choose c/{{ community.slug }} under Community in the editor.</span></div>
+{% endif %}
+
+{% if is_community_owner %}
+  <div class="community-danger">
+    <form method="post" action="{{ url_for('delete_community', slug=community.slug) }}"
+          onsubmit="return confirm('Delete this community? Its posts stay on their authors\' profiles.')">
+      <button class="link-button danger" type="submit">Delete this community</button>
+    </form>
+  </div>
+{% endif %}
+
+<div class="community-layout">
+  <div class="community-stream">
+    {% for item in posts %}
+      {{ post_card(item) }}
+    {% else %}
+      <div class="empty">No posts in this community yet.</div>
+    {% endfor %}
+  </div>
+  <aside class="community-members">
+    <h2>Members</h2>
+    {% for person in members %}
+      <div class="member-row">
+        <a class="member-identity" href="{{ url_for('profile', username=person.username) }}">
+          {{ small_avatar(person.profile_picture, person.display_name) }}
+          <span>{{ person.display_name }}{% if person.role != 'member' %}
+            <span class="badge badge-joined">{{ person.role }}</span>{% endif %}</span>
+        </a>
+        {% if can_manage_members and person.id != community.owner_id
+              and (is_community_owner or person.role == 'member') %}
+          <div class="member-controls">
+            {% if is_community_owner %}
+              <form method="post" action="{{ url_for('community_member_role', slug=community.slug, user_id=person.id) }}">
+                <select name="role" onchange="this.form.submit()">
+                  <option value="member" {% if person.role == 'member' %}selected{% endif %}>Member</option>
+                  <option value="moderator" {% if person.role == 'moderator' %}selected{% endif %}>Moderator</option>
+                </select>
+              </form>
+            {% endif %}
+            <form method="post" action="{{ url_for('community_remove_member', slug=community.slug, user_id=person.id) }}"
+                  onsubmit="return confirm('Remove {{ person.display_name }} from this community?')">
+              <button class="link-button danger" type="submit">Remove</button>
+            </form>
+          </div>
+        {% endif %}
+      </div>
+    {% else %}
+      <p class="muted">Just the owner so far.</p>
+    {% endfor %}
+  </aside>
+</div>
+{% endblock %}

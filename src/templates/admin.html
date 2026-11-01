@@ -64,6 +64,12 @@
         </strong>
         {% if person.deleted_at %}<span class="badge badge-deleted">deleted</span>{% endif %}
         {% if is_owner_username(person.username) %}<span class="owner-tag">owner</span>{% endif %}
+        {% if person.verified %}<span class="badge badge-verified">verified</span>{% endif %}
+        {% if gplus and not person.deleted_at %}
+          <form class="inline-verify" method="post" action="{{ url_for('verify_user', user_id=person.id) }}">
+            <button class="link-button" type="submit">{{ 'Remove check' if person.verified else 'Verify' }}</button>
+          </form>
+        {% endif %}
         <small>
           {% if person.deleted_at %}handle released{% else %}@{{ person.username }}{% endif %}
           · joined {{ person.created_at }}
@@ -174,6 +180,67 @@
   </div>
   {% else %}
     <p class="muted">No comments yet.</p>
+  {% endfor %}
+</section>
+
+{# Reports -------------------------------------------------------------------
+   Everything people have reported, newest first, with the post or comment and
+   the account it belongs to. Closing one is all this does: the ban form above is
+   where the decision is made, and it already records what it was for. #}
+<section id="reports" class="admin-comments">
+  <div class="section-heading"><h2>Reports</h2><span>{{ reports|length }}</span></div>
+  <p class="muted">Open reports from visitors. Close one once you have looked at it.</p>
+  {% for report in reports %}
+    <div class="admin-row">
+      <div class="account-main">
+        <strong>{{ report.kind|capitalize }} report{% if report.target_name %} · {{ report.target_name }}{% endif %}</strong>
+        <small>from {{ report.reporter_username or 'a visitor' }} · {{ report.created_at }} UTC</small>
+        <p>{{ report.reason }}</p>
+        {% if report.post_public_id %}
+          <small><a href="{{ url_for('post', public_id=report.post_public_id) }}">“{{ report.post_title }}”</a></small>
+        {% endif %}
+        {% if report.comment_content %}
+          <small class="ban-cause">“{{ report.comment_content|striptags|truncate(140) }}”</small>
+        {% endif %}
+      </div>
+      <form method="post" action="{{ url_for('resolve_report', report_id=report.id) }}">
+        <button class="clear-ban" type="submit">Close report</button>
+      </form>
+    </div>
+  {% else %}
+    <p class="muted">No open reports.</p>
+  {% endfor %}
+</section>
+
+{# Email ----------------------------------------------------------------------
+   Notifications queue a digest line in `email_outbox`; nothing is sent from the
+   request that caused it. This is where the queue is flushed, in one batch, and
+   where a failed send shows the provider's answer. #}
+<section id="email" class="admin-comments">
+  <div class="section-heading"><h2>Email</h2><span>{{ email_pending }} queued</span></div>
+  <p class="muted">
+    {% if email_ready %}
+      A mail provider is configured. Flushing sends up to 20 queued messages.
+    {% else %}
+      Email is <strong>not configured</strong>. Set <code>EMAIL_API_KEY</code>,
+      <code>EMAIL_FROM</code> and (optionally) <code>EMAIL_API_URL</code> as Worker
+      secrets or variables, then flush the queue here. Until then, people still get
+      every notification in the bell - only the email copy is held.
+    {% endif %}
+  </p>
+  <form class="refresh-links" method="post" action="{{ url_for('admin_flush_email') }}">
+    <button type="submit">Send queued email</button>
+  </form>
+  {% for mail in email_recent %}
+    <div class="admin-row">
+      <div class="account-main">
+        <strong>{{ mail.subject }}</strong>
+        <small>to {{ mail.to_address }} · {{ mail.kind or 'notice' }} · {{ mail.created_at }} UTC
+          · {% if mail.sent_at %}sent {{ mail.sent_at }} UTC{% elif mail.error %}<span class="danger-text">{{ mail.error }}</span>{% else %}pending{% endif %}</small>
+      </div>
+    </div>
+  {% else %}
+    <p class="muted">Nothing has been queued yet.</p>
   {% endfor %}
 </section>
 

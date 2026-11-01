@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import post_card, person_row with context %}
+{% block title %}What's hot · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>What's hot</h1>
+  <p>The posts the site has been paying attention to over the last two weeks -
+    +1s, comments and reshares, not raw recency.</p>
+</div>
+
+{% if tags %}
+  <div class="tag-strip">
+    <span class="strip-label">Trending tags</span>
+    {% for item in tags %}
+      <a class="tag-chip" href="{{ url_for('tag', tag=item.tag) }}">#{{ item.tag }}
+        <span class="chip-count">{{ item.uses }}</span></a>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% for item in posts %}
+  {{ post_card(item) }}
+{% else %}
+<div class="empty">Nothing hot yet. <a href="{{ url_for('home') }}">Read the stream.</a></div>
+{% endfor %}
+
+{% if people %}
+  <div class="section-label">People to follow</div>
+  {% for person in people %}
+    {{ person_row(person, false, url_for('explore')) }}
+  {% endfor %}
+{% endif %}
+{% endblock %}

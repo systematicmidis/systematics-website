@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import post_card with context %}
+{% block title %}#{{ tag }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow">HASHTAG</p>
+  <h1>#{{ tag }}</h1>
+  <p>{{ posts|length }} post{% if posts|length != 1 %}s{% endif %} carrying this tag.</p>
+</div>
+{% for item in posts %}
+  {{ post_card(item) }}
+{% else %}
+<div class="empty">Nothing tagged #{{ tag }} yet.</div>
+{% endfor %}
+{% endblock %}

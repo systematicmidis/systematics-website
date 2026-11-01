@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import small_avatar with context %}
+{% block title %}Notifications · Settings · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow"><a href="{{ url_for('settings') }}">Settings</a></p>
+  <h1>Notifications</h1>
+  <p>Choose what rings the bell, and whether a digest email goes to an address you own.</p>
+</div>
+
+<section class="settings-card">
+  <h2>What to notify me about</h2>
+  <form method="post">
+    <div class="pref-grid">
+      {% for kind in kinds %}
+        <label class="pref-row">
+          <input type="checkbox" name="notify_{{ kind }}" {% if prefs[kind] %}checked{% endif %}>
+          <span>{{ labels[kind] }}</span>
+        </label>
+      {% endfor %}
+    </div>
+
+    <h3 class="owner-subhead">Email digest</h3>
+    <p class="muted">
+      {% if email_ready %}
+        Email is configured on this site. Queued messages are sent in batches by an admin.
+      {% else %}
+        Email is <strong>not configured</strong> yet. You can still set an address; nothing is
+        sent until the site owner adds a mail provider key.
+      {% endif %}
+    </p>
+    <label>Email address
+      <input type="email" name="email" maxlength="{{ max_email }}"
+             value="{{ current_user.email or '' }}" placeholder="you@example.com">
+    </label>
+    <label class="pref-row">
+      <input type="checkbox" name="email_digest" {% if current_user.email_digest %}checked{% endif %}>
+      <span>Also queue a short email for the notifications above</span>
+    </label>
+
+    <div class="actions">
+      <button type="submit">Save notification settings</button>
+      <a href="{{ url_for('settings') }}">Back to settings</a>
+    </div>
+  </form>
+</section>
+
+<section class="settings-card">
+  <h2>Muted accounts</h2>
+  <p class="muted">Muting hides somebody's posts from your streams without blocking them:
+    their profile still opens and messages still work.</p>
+  {% for person in muted %}
+    <div class="person-row">
+      {{ small_avatar(person.profile_picture, person.display_name) }}
+      <div class="person-main">
+        <a href="{{ url_for('profile', username=person.username) }}"><strong>{{ person.display_name }}</strong></a>
+        <span class="person-meta">@{{ person.username }}</span>
+      </div>
+      <form method="post" action="{{ url_for('mute_user', username=person.username) }}">
+        <input type="hidden" name="next" value="{{ url_for('notification_settings') }}">
+        <button class="link-button" type="submit">Unmute</button>
+      </form>
+    </div>
+  {% else %}
+    <p class="muted">You have not muted anyone.</p>
+  {% endfor %}
+</section>
+{% endblock %}

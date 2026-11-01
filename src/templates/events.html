@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Events · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Events</h1>
+  <p>Premiers, listening parties, deadlines. An event collects who is coming and the
+    posts written under it.</p>
+</div>
+
+{% if needs_migration %}
+  <div class="empty">Events need the newest database migration. Run
+    <code>npm run db:remote</code> and reload.</div>
+{% else %}
+  {% if current_user %}
+    <div class="feed-cta"><a class="button" href="{{ url_for('new_event') }}">＋ Create an event</a></div>
+  {% endif %}
+  <div class="event-grid">
+    {% for event in events %}
+      <a class="event-card" href="{{ url_for('event', event_id=event.id) }}">
+        <span class="event-date">{{ event.starts_at }}</span>
+        <strong>{{ event.title }}</strong>
+        {% if event.location %}<span class="muted">{{ event.location }}</span>{% endif %}
+        <span class="event-meta">{{ event.going_count }} going · by {{ event.owner_name }}</span>
+      </a>
+    {% else %}
+      <p class="muted">No events yet.</p>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import post_card, small_avatar with context %}
+{% block title %}{{ event.title }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="event-header">
+  <p class="eyebrow">EVENT</p>
+  <h1>{{ event.title }}</h1>
+  <p class="event-when">{{ event.starts_at }}{% if event.location %} · {{ event.location }}{% endif %}</p>
+  <p class="muted">By <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a></p>
+</div>
+
+{% if event.description %}<div class="about-card"><p>{{ event.description|linkify }}</p></div>{% endif %}
+
+{% if current_user %}
+  <div class="rsvp-box">
+    <span>Are you going?</span>
+    {% for value, label in [('going', 'Going'), ('maybe', 'Maybe'), ('no', 'Can\'t go')] %}
+      <form method="post" action="{{ url_for('rsvp_event', event_id=event.id) }}">
+        <input type="hidden" name="status" value="{{ value }}">
+        <button class="button small{% if attendance and attendance.status == value %} active{% endif %}"
+                type="submit">{{ label }}</button>
+      </form>
+    {% endfor %}
+  </div>
+{% endif %}
+
+<div class="community-layout">
+  <div class="community-stream">
+    <div class="section-label">Posts for this event</div>
+    {% for item in posts %}
+      {{ post_card(item) }}
+    {% else %}
+      <div class="empty">Nothing posted under this event yet.</div>
+    {% endfor %}
+  </div>
+  <aside class="community-members">
+    <h2>Who is coming</h2>
+    {% for person in attendees %}
+      <a class="member-row" href="{{ url_for('profile', username=person.username) }}">
+        {{ small_avatar(person.profile_picture, person.display_name) }}
+        <span>{{ person.display_name }} <span class="badge badge-joined">{{ person.status }}</span></span>
+      </a>
+    {% else %}
+      <p class="muted">Nobody has replied yet.</p>
+    {% endfor %}
+  </aside>
+</div>
+{% endblock %}

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import post_card, person_row, small_avatar with context %}
+{% block title %}{% if q %}{{ q }} · {% endif %}Search · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Search</h1>
+  <form class="search-page-form" action="{{ url_for('search') }}" method="get" role="search">
+    <input type="search" name="q" value="{{ q }}" placeholder="Posts, people, comments, #tags" autofocus>
+    <button type="submit">Search</button>
+  </form>
+</div>
+
+{% if q %}
+  <div class="section-label">Posts ({{ posts|length }})</div>
+  {% for item in posts %}
+    {{ post_card(item) }}
+  {% else %}
+    <p class="muted">No posts match "{{ q }}".</p>
+  {% endfor %}
+
+  <div class="section-label">People ({{ people|length }})</div>
+  {% for person in people %}
+    {{ person_row(person, person.viewer_follows, url_for('search', q=q)) }}
+  {% else %}
+    <p class="muted">No accounts match "{{ q }}".</p>
+  {% endfor %}
+
+  <div class="section-label">Comments ({{ comments|length }})</div>
+  {% for comment in comments %}
+    <a class="profile-comment" href="{{ url_for('post', public_id=comment.post_public_id) }}#comment-{{ comment.id }}">
+      <p>{{ comment.content|linkify(200) }}</p>
+      <span>{{ comment.display_name }} on {{ comment.post_title }}</span>
+    </a>
+  {% else %}
+    <p class="muted">No comments match "{{ q }}".</p>
+  {% endfor %}
+{% elif not q %}
+  <div class="empty">Type something above. <a href="{{ url_for('explore') }}">Or see what's hot.</a></div>
+{% endif %}
+{% endblock %}

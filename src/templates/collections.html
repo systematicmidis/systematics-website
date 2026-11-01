@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Collections · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Collections</h1>
+  <p>Topic streams inside your own posts - "Armageddon", "Tutorials", "Live sets".
+    Pick one when you write a post and it gets its own page.</p>
+</div>
+
+<form class="inline-form stacked" method="post" action="{{ url_for('create_collection') }}">
+  <input name="name" maxlength="{{ max_name }}" placeholder="Collection name" required>
+  <input name="description" maxlength="{{ max_description }}" placeholder="What belongs in it? (optional)">
+  <button type="submit">Create collection</button>
+</form>
+
+<div class="collection-grid">
+  {% for collection in collections %}
+    <section class="collection-card">
+      <a class="collection-name" href="{{ url_for('collection', collection_id=collection.id) }}">{{ collection.name }}</a>
+      {% if collection.description %}<p class="muted">{{ collection.description }}</p>{% endif %}
+      <span class="collection-count">{{ collection.post_count }} post{% if collection.post_count != 1 %}s{% endif %}</span>
+      <form method="post" action="{{ url_for('delete_collection', collection_id=collection.id) }}"
+            onsubmit="return confirm('Delete this collection? Its posts stay on your profile.')">
+        <button class="link-button danger" type="submit">Delete</button>
+      </form>
+    </section>
+  {% else %}
+    <p class="muted">No collections yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

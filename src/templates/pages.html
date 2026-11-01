@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import avatar with context %}
+{% block title %}Pages · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Pages</h1>
+  <p>Brand identities people manage, the way Google+ Pages worked. A page writes
+    posts under its own name and avatar; anyone who manages it can post as it.</p>
+</div>
+
+{% if needs_migration %}
+  <div class="flash error">Pages need the newest database migration. Run
+    <code>npm run db:remote</code> and reload.</div>
+{% else %}
+  {% if current_user %}
+    <section class="settings-card">
+      <h2>Create a page</h2>
+      <form method="post" action="{{ url_for('create_page') }}" enctype="multipart/form-data">
+        <div class="editor-row">
+          <label>Name
+            <input name="name" maxlength="{{ max_name }}" required placeholder="Systematics Records">
+          </label>
+          <label>Address
+            <input name="slug" maxlength="40" required placeholder="systematics-records"
+                   pattern="[a-z0-9-]{3,40}">
+            <span class="muted">Lowercase letters, numbers and hyphens. It becomes
+              <code>/pages/your-address</code>.</span>
+          </label>
+        </div>
+        <label>Tagline
+          <input name="tagline" maxlength="{{ max_tagline }}" placeholder="Optional one-liner">
+        </label>
+        <label>About
+          <textarea name="about" rows="4" maxlength="{{ max_about }}"></textarea>
+        </label>
+        <div class="editor-row">
+          <label>Avatar
+            <input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp">
+          </label>
+          <label>Banner
+            <input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp">
+          </label>
+        </div>
+        <div class="actions"><button type="submit">Create page</button></div>
+      </form>
+    </section>
+  {% else %}
+    <div class="feed-cta">
+      <a class="button" href="{{ url_for('login', next=url_for('pages')) }}">Sign in</a>
+      <span class="muted">to create a page.</span>
+    </div>
+  {% endif %}
+
+  {% if my_pages %}
+    <div class="section-label">Your pages</div>
+    <div class="collection-strip">
+      {% for item in my_pages %}
+        <a class="collection-card" href="{{ url_for('page_detail', slug=item.slug) }}">
+          <span class="collection-name">{{ item.name }}</span>
+          <span class="collection-count">/pages/{{ item.slug }}</span>
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="section-label">All pages</div>
+  {% for item in pages %}
+    <div class="admin-row page-row">
+      {{ avatar(item.avatar, item.name) }}
+      <div class="account-main">
+        <strong><a href="{{ url_for('page_detail', slug=item.slug) }}">{{ item.name }}</a></strong>
+        <small>/pages/{{ item.slug }} · {{ item.post_count }} post{% if item.post_count != 1 %}s{% endif %}
+          · managed by @{{ item.owner_username }}</small>
+        {% if item.tagline %}<p class="muted">{{ item.tagline }}</p>{% endif %}
+      </div>
+      <div class="actions"><a href="{{ url_for('page_detail', slug=item.slug) }}">Open</a></div>
+    </div>
+  {% else %}
+    <div class="empty">No pages yet.</div>
+  {% endfor %}
+{% endif %}
+{% endblock %}

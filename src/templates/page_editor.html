@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ page.name }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="editor">
+  <p class="eyebrow">PAGE EDITOR</p>
+  <h1>Edit {{ page.name }}</h1>
+  <p class="muted">Public address: <code>/pages/{{ page.slug }}</code></p>
+  <form method="post" enctype="multipart/form-data">
+    <label>Name
+      <input name="name" value="{{ page.name }}" maxlength="{{ max_name }}" required>
+    </label>
+    <label>Tagline
+      <input name="tagline" value="{{ page.tagline or '' }}" maxlength="{{ max_tagline }}">
+    </label>
+    <label>About
+      <textarea name="about" rows="8" maxlength="{{ max_about }}">{{ page.about or '' }}</textarea>
+    </label>
+    <div class="editor-row">
+      <label>Avatar
+        <input type="file" name="avatar" accept="image/png,image/jpeg,image/gif,image/webp">
+        {% if page.avatar %}
+          <span class="muted"><label class="inline-label"><input type="checkbox" name="remove_avatar"> Remove the current avatar</label></span>
+        {% endif %}
+      </label>
+      <label>Banner
+        <input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp">
+        {% if page.banner %}
+          <span class="muted"><label class="inline-label"><input type="checkbox" name="remove_banner"> Remove the current banner</label></span>
+        {% endif %}
+      </label>
+    </div>
+    <div class="actions">
+      <button type="submit">Save page</button>
+      <a href="{{ url_for('page_detail', slug=page.slug) }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

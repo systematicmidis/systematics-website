@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import post_card with context %}
+{% block title %}{{ album.name }} · {{ owner.display_name }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow"><a href="{{ url_for('photos', username=owner.username) }}">{{ owner.display_name }}'s photos</a></p>
+  <h1>{{ album.name }}</h1>
+  {% if album.description %}<p>{{ album.description }}</p>{% endif %}
+  <p class="muted">{{ posts|length }} post{% if posts|length != 1 %}s{% endif %} in this album.</p>
+  {% if is_owner %}
+    <form method="post" action="{{ url_for('delete_album', album_id=album.id) }}"
+          onsubmit="return confirm('Delete this album? The posts in it stay on your profile.')">
+      <button class="link-button danger" type="submit">Delete album</button>
+    </form>
+  {% endif %}
+</div>
+
+{% for item in posts %}
+  {{ post_card(item) }}
+{% else %}
+  <div class="empty">Nothing in this album yet. Open one of your photo posts and file it
+    into this album from the post page.</div>
+{% endfor %}
+{% endblock %}

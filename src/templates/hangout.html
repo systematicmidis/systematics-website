@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ hangout.title }} · Hangout{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow">{{ 'Hangout On Air' if hangout.kind == 'onair' else 'Hangout' }}</p>
+  <h1>{{ hangout.title }}</h1>
+  <p class="muted">Started by <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a>
+    · {{ hangout.created_at[:16] }} UTC{% if hangout.ended_at %} · ended{% endif %}</p>
+  {% if is_owner and not hangout.ended_at %}
+    <form method="post" action="{{ url_for('end_hangout', room=hangout.room) }}">
+      <button class="link-button danger" type="submit">End hangout</button>
+    </form>
+  {% endif %}
+</div>
+
+{% if hangout.ended_at %}
+  <div class="empty">This hangout has ended.</div>
+{% else %}
+  <div class="hangout-stage">
+    <iframe class="hangout-frame" src="{{ jitsi_url }}"
+            title="{{ hangout.title }}"
+            allow="camera; microphone; fullscreen; display-capture; autoplay; clipboard-write"
+            allowfullscreen></iframe>
+  </div>
+  <p class="muted hangout-note">The room runs on <code>meet.jit.si</code>. Your browser will ask
+    for camera and microphone access when you join; nothing is recorded by this site.</p>
+  {% if video_id and hangout.kind == 'onair' %}
+    <div class="media-embed">
+      <iframe src="https://www.youtube.com/embed/{{ video_id }}" title="Live stream"
+              allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+    </div>
+  {% endif %}
+{% endif %}
+{% endblock %}

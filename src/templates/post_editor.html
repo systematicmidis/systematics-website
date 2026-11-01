@@ -4,7 +4,7 @@
 <div class="editor">
   <p class="eyebrow">CONTENT EDITOR</p>
   <h1>{% if post %}Edit post{% else %}Create a post{% endif %}</h1>
-  <form method="post">
+  <form method="post" enctype="multipart/form-data">
     <label>Title
       <input name="title" value="{{ post.title if post else '' }}" maxlength="200" required>
     </label>
@@ -30,6 +30,78 @@
       </p>
     {% endif %}
 
+    {% if my_pages %}
+      <label>Post as
+        <select name="page_id">
+          <option value="">Yourself ({{ current_user.display_name }})</option>
+          {% for page in my_pages %}
+            <option value="{{ page.id }}" {% if post and post.page_id == page.id %}selected{% endif %}>{{ page.name }}</option>
+          {% endfor %}
+        </select>
+        <span class="muted">A page posts under its own name and avatar. The account
+          stays the author of record. <a href="{{ url_for('pages') }}">Manage pages</a>.</span>
+      </label>
+    {% endif %}
+
+    {% if gplus %}
+      <label>Audience
+        <select name="audience">
+          <option value="public" {% if not post or (post.audience or 'public') == 'public' %}selected{% endif %}>Public - anyone can see it</option>
+          <option value="circles" {% if post and post.audience == 'circles' %}selected{% endif %}>One of my circles</option>
+          <option value="private" {% if post and post.audience == 'private' %}selected{% endif %}>Only me</option>
+        </select>
+      </label>
+      {% if circles %}
+        <label>Which circle
+          <select name="circle_id">
+            <option value="">Choose a circle...</option>
+            {% for circle in circles %}
+              <option value="{{ circle.id }}" {% if post and post.circle_id == circle.id %}selected{% endif %}>
+                {{ circle.name }} ({{ circle.member_count }})
+              </option>
+            {% endfor %}
+          </select>
+          <span class="muted">A circle post is visible to its author and the people in that circle.
+            <a href="{{ url_for('circles') }}">Manage circles</a>.</span>
+        </label>
+      {% endif %}
+    {% endif %}
+
+    {% if gplus and (collections or my_communities or my_events) %}
+      <div class="editor-row">
+        {% if collections %}
+          <label>Collection
+            <select name="collection_id">
+              <option value="">No collection</option>
+              {% for collection in collections %}
+                <option value="{{ collection.id }}" {% if post and post.collection_id == collection.id %}selected{% endif %}>{{ collection.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        {% endif %}
+        {% if my_communities %}
+          <label>Community
+            <select name="community_id">
+              <option value="">Your own stream</option>
+              {% for community in my_communities %}
+                <option value="{{ community.id }}" {% if post and post.community_id == community.id %}selected{% endif %}>c/{{ community.slug }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        {% endif %}
+        {% if my_events %}
+          <label>Event
+            <select name="event_id">
+              <option value="">No event</option>
+              {% for event in my_events %}
+                <option value="{{ event.id }}" {% if post and post.event_id == event.id %}selected{% endif %}>{{ event.title }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        {% endif %}
+      </div>
+    {% endif %}
+
     {% if can_choose_status %}
       <label>Status
         <select name="status">
@@ -47,11 +119,46 @@
         with the page's title, image and site.</span>
       <span class="muted">To link words rather than show the address, write them as
         <code>[the words](https://example.com)</code>.</span>
+      <span class="muted">**bold**, *italic*, ~~strikethrough~~, @mentions and #hashtags work
+        in posts and comments.</span>
       <span class="muted">Two tokens fill themselves in: <code>[DATE]</code> becomes this
         post's date and time, shown on each reader's own clock, and <code>[COMMITS]</code>
         becomes the newest commits from GitHub, one line each - which is how an update log
         stays current without being edited.</span>
     </label>
+
+    {% if gplus %}
+      <label>Content warning
+        <input name="content_warning" maxlength="120"
+               value="{{ post.content_warning if post and post.content_warning else '' }}"
+               placeholder="Optional - e.g. flashing images, loud audio">
+        <span class="muted">The body is hidden behind a click until the reader opts in.</span>
+      </label>
+
+      <label>Photos (up to {{ max_images }})
+        <input type="file" name="images" accept="image/png,image/jpeg,image/gif,image/webp" multiple>
+        <span class="muted">Each image must be under {{ (1700000 // 1000) }} KB.
+          A post with photos appears in your profile's Photos tab.</span>
+      </label>
+      {% if images %}
+        <div class="editor-thumbs">
+          {% for image in images %}
+            <label class="editor-thumb">
+              <img src="{{ url_for('uploads', filename=image.filename) }}" alt="">
+              <span><input type="checkbox" name="remove_image" value="{{ image.id }}"> Remove</span>
+            </label>
+          {% endfor %}
+        </div>
+      {% endif %}
+
+      <label>Tag people
+        <input name="tag_people" maxlength="300" value="{{ tagged_value }}"
+               placeholder="@handle @handle">
+        <span class="muted">They are credited on the post and it appears under Photos of you
+          on their profile.</span>
+      </label>
+    {% endif %}
+
     <div class="actions">
       <button type="submit">{% if post %}Save changes{% else %}Publish post{% endif %}</button>
       <a href="{{ cancel_url }}">Cancel</a>

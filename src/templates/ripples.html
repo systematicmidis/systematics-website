@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import small_avatar with context %}
+{% block title %}Ripples · {{ post.title }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow">RIPPLES</p>
+  <h1>{{ post.title }}</h1>
+  <p>How this post travelled: <a href="{{ post_url(post) }}">read it in place</a>.</p>
+</div>
+
+<div class="ripple-stats">
+  <div class="ripple-stat"><strong>{{ post.score }}</strong><span>score</span></div>
+  <div class="ripple-stat"><strong>{{ post.comment_count }}</strong><span>comments</span></div>
+  <div class="ripple-stat"><strong>{{ shares|length }}</strong><span>reshares</span></div>
+  <div class="ripple-stat"><strong>{{ post.photo_count or 0 }}</strong><span>photos</span></div>
+</div>
+
+<div class="ripple-columns">
+  <section class="people-card">
+    <h2>+1s ({{ voters|length }})</h2>
+    {% for voter in voters %}
+      <a class="member-row" href="{{ url_for('profile', username=voter.username) }}">
+        {{ small_avatar(voter.profile_picture, voter.display_name) }}
+        <span>{{ voter.display_name }} <small class="muted">{{ voter.created_at[:16] }}</small></span>
+      </a>
+    {% else %}
+      <p class="muted">Nobody has +1'd this yet.</p>
+    {% endfor %}
+  </section>
+
+  <section class="people-card">
+    <h2>Reshares ({{ shares|length }})</h2>
+    {% for share in shares %}
+      <a class="member-row" href="{{ url_for('profile', username=share.username) }}">
+        {{ small_avatar(share.profile_picture, share.display_name) }}
+        <span>{{ share.display_name }} <small class="muted">{{ share.created_at[:16] }}</small></span>
+      </a>
+    {% else %}
+      <p class="muted">It has not been shared yet.</p>
+    {% endfor %}
+  </section>
+</div>
+
+{% if dislikers %}
+  <div class="section-label">Dislikes ({{ dislikers|length }})</div>
+  <p class="muted">Dislikes are private to the site's counters; a dislike never notified its author.</p>
+{% endif %}
+{% endblock %}

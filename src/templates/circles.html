@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import small_avatar, person_row with context %}
+{% block title %}Circles · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <h1>Circles</h1>
+  <p>Groups of the people you follow, the way Google+ organised them. A circle is
+    private: nobody is told which one they are in, and a post shared with one is
+    visible only to its members.</p>
+</div>
+
+<form class="inline-form" method="post" action="{{ url_for('create_circle') }}">
+  <input name="name" maxlength="{{ max_circle_name }}" placeholder="New circle name" required>
+  <button type="submit">Create circle</button>
+</form>
+
+{% for circle in circles %}
+  <section class="circle-card">
+    <div class="section-heading">
+      <h2>◎ {{ circle.name }}</h2>
+      <span>{{ circle.member_count }} member{% if circle.member_count != 1 %}s{% endif %}</span>
+    </div>
+    <div class="circle-actions">
+      <a class="button small" href="{{ url_for('home', feed='circle', circle=circle.id) }}">Read this circle</a>
+      <form method="post" action="{{ url_for('delete_circle', circle_id=circle.id) }}"
+            onsubmit="return confirm('Delete this circle? Posts shared with it become visible only to you.')">
+        <button class="link-button danger" type="submit">Delete</button>
+      </form>
+    </div>
+
+    <form class="inline-form" method="post" action="{{ url_for('add_to_circle', circle_id=circle.id) }}">
+      <input name="username" maxlength="24" placeholder="Add somebody: @handle" required>
+      <button type="submit">Add</button>
+    </form>
+
+    <div class="circle-members">
+      {% for person in members[circle.id] %}
+        <div class="circle-person">
+          {{ small_avatar(person.profile_picture, person.display_name) }}
+          <a href="{{ url_for('profile', username=person.username) }}">{{ person.display_name }}</a>
+          <span class="muted">@{{ person.username }}</span>
+          <form method="post" action="{{ url_for('remove_from_circle', circle_id=circle.id, user_id=person.id) }}">
+            <button class="link-button" type="submit">Remove</button>
+          </form>
+        </div>
+      {% else %}
+        <p class="muted">Nobody in this circle yet. Add someone by handle, or from their profile.</p>
+      {% endfor %}
+    </div>
+  </section>
+{% else %}
+  <div class="empty">No circles yet. Create one above, then add the people you follow.</div>
+{% endfor %}
+{% endblock %}

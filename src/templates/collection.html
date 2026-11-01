@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% from "_widgets.html" import post_card with context %}
+{% block title %}{{ collection.name }} · Systematics Black Midi site{% endblock %}
+{% block content %}
+<div class="feed-header">
+  <p class="eyebrow">COLLECTION</p>
+  <h1>{{ collection.name }}</h1>
+  <p>
+    {% if collection.description %}{{ collection.description }} · {% endif %}
+    {{ posts|length }} post{% if posts|length != 1 %}s{% endif %} by
+    <a href="{{ url_for('profile', username=owner.username) }}">{{ owner.display_name }}</a>
+  </p>
+</div>
+{% for item in posts %}
+  {{ post_card(item) }}
+{% else %}
+<div class="empty">Nothing in this collection yet.</div>
+{% endfor %}
+{% endblock %}

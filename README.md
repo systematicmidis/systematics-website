@@ -1,18 +1,24 @@
 # Systematics Black MIDI site
 
-A small Flask community site (accounts with bios, avatars, custom profile banners and social
-links, followers, posts, two feeds, likes/dislikes and threaded comments) that runs on **Cloudflare Workers**
-using the Python Workers runtime and D1 - and that fits on the **Workers Free plan, with no
-payment method on file**. See ["Running free"](#running-free-no-payment-method) for what that
-costs and limits.
+A Google+-shaped community site - accounts with taglines, structured About cards, avatars,
+custom banners and social links; **circles and an audience selector**; **collections**,
+**communities** and **events**; photo posts and **named albums**; reshares; **+1s on posts and
+comments**; hashtags and @mentions; a **notifications** bell with per-kind switches and an
+optional email digest; **Pages**, **Sparks**, **Hangouts** rooms and **post embeds**; search and
+a **What's hot** stream; blocking, muting and reports - that runs on **Cloudflare Workers**
+using the Python Workers runtime and D1, on the **Workers Free plan, with no payment method on
+file**. See
+["Running free"](#running-free-no-payment-method) for what that costs and limits, and
+["The Google+ revival"](#the-google-revival) for what is built and what deliberately is not.
 
 | Piece | Cloudflare product | Where it lives |
 | --- | --- | --- |
 | Flask app (routes + Jinja templates) | Python Workers (`workers-py` / `pywrangler`) | `src/worker.py`, `src/templates/` |
-| Users (with bios), posts, comments, votes, follows | D1 (SQLite) binding `DB` | `migrations/` |
+| Users, posts, comments, votes, follows, circles, communities, events, notifications | D1 (SQLite) binding `DB` | `migrations/` |
 | Conversations, their messages, and the moderation log | D1 tables `conversations`, `messages`, `moderation_log` | `migrations/0014_messages.sql`, `0015_direct_messages.sql` |
-| Uploaded profile pictures and banners | D1 `uploads` table (BLOB rows) | `migrations/0005_uploads_in_d1.sql` |
-| Stylesheets | Workers static assets binding `ASSETS` | `public/static/` |
+| Uploaded profile pictures, banners, page images and post photos | D1 `uploads` table (BLOB rows) | `migrations/0005_uploads_in_d1.sql`, `0016_google_plus_revival.sql`, `0017_pages_mutes_mail_and_rooms.sql` |
+| Mutes, notification preferences, the email outbox, Pages, albums, Hangouts and Sparks | D1 tables added by `0017` | `migrations/0017_pages_mutes_mail_and_rooms.sql` |
+| Stylesheets and behaviour | Workers static assets binding `ASSETS` | `public/static/` |
 
 ## Project layout
 
@@ -613,6 +619,111 @@ disappear but never smuggle one in. One bad link refuses the whole save and name
 came from instead of silently dropping it, a profile is capped at `MAX_SOCIAL_LINKS` (13), and
 closing your account clears the column along with the bio and the images.
 
+## The Google+ revival
+
+Migration `0016_google_plus_revival.sql` adds the product Google+ was, around the feed this
+site already had. The code reads every revival-only table and column **only when that
+migration is applied** (`gplus_schema()`), so a deploy that lands before `npm run db:remote`
+keeps serving the old site instead of answering every page with Cloudflare error 1101. The
+new screens link themselves out of the rail until the migration is there.
+
+**Circles and the audience selector.** `/circles` manages named groups of the people you
+follow (nobody is told which circle they are in). The composer can share a post with the
+public, with one circle, or with only yourself. `visibility_sql()` is the single rule every
+stream uses, so a circle post is hidden from the feed, search, tag pages, profiles and its own
+URL for anyone outside the circle. A restricted post carries **Limited**.
+
+**Collections** (`/collections`) are topic streams inside one account's own posts, each with
+its own page. **Communities** (`/communities`, `/c/<slug>`) have their own stream, members and
+owner, and a post can be filed into one. **Events** (`/events`) collect Going/Maybe/No replies
+and the posts written under them.
+
+**Posts** gained photos (up to four, stored in D1's `uploads`, with a lightbox and a Photos tab
+on the profile), inline YouTube/SoundCloud players, reshares that quote the original instead of
+copying it, a **pin** for the top of a profile, a **lock** that stops comments and reshares, a
+content warning, hashtags with `/tag/<tag>` pages, `@mentions` that notify, and
+`**bold**`/`*italic*`/`~~strike~~` in bodies, comments and bios. Comments gained **+1s**, the
+author can now delete comments on their own post, anyone can edit or delete their own comment
+(with a permalink to it), and long reply threads collapse.
+
+**Notifications** (`/notifications`) is the bell in the rail, with an unread badge: +1s on your
+posts and comments, comments and replies, mentions, follows, reshares and photo tags. A post
+can be muted so its notifications stop. **Find people** (`/people`) uses follows-of-follows,
+and `?feed=incoming` is Google+'s Incoming stream: people who follow you that you have not
+followed back.
+
+**Discovery**: `/search` covers posts, people and comments (the LIKE escape is in
+`like_pattern()`); `/explore` is What's Hot, ranked by +1s, comments and reshares over the last
+two weeks, with the trending tag strip.
+
+**Profiles** gained a tagline, a nickname, the structured About fields (work, education, places,
+relationship, birthday, gender, contact, **bragging rights**), a banner crop, a verified check
+(set from the admin panel), hover cards, a Photos tab and "Photos of you" for tagged people.
+
+**Safety**: blocking is mutual invisibility - feeds, following and new messages all consult it,
+while the two people can still read a conversation they already had. Reports from visitors land
+in the admin panel with the post or comment attached, and closing one is one click.
+
+**Reading**: the feed pages 20 posts at a time with `?before=<post id>` as the cursor. The
+"Older posts" link works on its own, and `public/static/gplus.js` turns it into infinite scroll,
+the photo lightbox and the hover cards when JavaScript is available. Nothing in that script is
+the only way to reach something.
+
+**Ripples** (`/post/<id>/ripples`) is the engagement behind one post: who +1'd it, who reshared
+it and when. **Settings → Download my data** (`/settings/export`) is a Takeout-shaped JSON file
+of the profile, posts (with image filenames), comments, follows, circles and collections.
+
+Migration `0017_pages_mutes_mail_and_rooms.sql` adds the rest. Like `0016`, it is read through
+`gplus2_schema()`, so a deploy that lands first simply hides these screens rather than breaking
+the site.
+
+**Muting a person** is the softer control beside Block: from a profile, *Mute* removes their
+posts from your streams and stops their notifications, while their profile, messages and a
+link you already have keep working. The muted list lives on
+**Settings → Notification settings**, where each kind of notification can also be switched off.
+An account can add an email address and ask for a digest; notices are written to the
+`email_outbox` table, never sent during the request that caused them, and an admin sends the
+batch from **Admin → Email**. That panel says plainly when no provider is configured. To turn
+it on, set `EMAIL_API_KEY` and `EMAIL_FROM` - plus `EMAIL_API_URL` if the provider is not
+Resend, whose endpoint is the default - as Worker variables/secrets (`wrangler secret put ...`
+or the dashboard). Any
+Resend-compatible `POST {from,to,subject,text}` endpoint works; with no key the site still
+delivers every notification in the bell.
+
+**Pages** (`/pages`) are brand identities people manage, with their own slug, tagline, About
+text, avatar, banner and stream. A manager picks the page under **Post as** in the composer;
+the post then shows the page's name and avatar while the account stays the author of record for
+moderation and for the post's URL. The owner can add or remove managers, and deleting a page
+leaves its posts on their authors' profiles.
+
+**Albums** are named groups of one account's photo posts. Create one from a profile's Photos
+tab, then file any of your photo posts into it from the album box on the post page. A post can
+sit in several albums; an album with nothing in it is private to its owner.
+
+**Hangouts** (`/hangouts`) are live rooms on Jitsi's free public service (`meet.jit.si`): no
+relay, account or payment method. The room name is random, the site embeds it, and the person
+who started it ends it. **On Air** is the same room with an optional YouTube stream embedded
+beside it - the site itself never records or rebroadcasts anything.
+
+**Sparks** (`/sparks`) are interest feeds of outside links: one topic, a stream of articles
+people add to it. Cards come from the same `link_previews` cache posts use, so a Spark page
+never waits on another website while rendering.
+
+**Community roles**: an owner can promote a member to moderator, demote them again, remove
+members, or delete the community (its posts return to their authors' profiles). Moderators can
+remove ordinary members but cannot change roles or remove another moderator.
+
+**Embedding a post**: every post page has an *Embed* box with an `<iframe>` snippet for
+`/post/<row id>/embed`, a bare page showing just the post for another site.
+
+**Still not built**, and why:
+
+| Not built | Why |
+| --- | --- |
+| Hangouts recording, broadcasting or a private TURN relay | Recording needs storage and a paid SFU; Jitsi's public rooms are the free version of the same feature. |
+| Pages with their own login | A page is an identity a person manages, not a separate account; that also keeps moderation attached to a real person. |
+| Full-text search | `LIKE` is enough at this size, and D1's FTS tables would need a second sync path on every write. |
+
 ## Schema changes
 
 The database schema is versioned in `migrations/` and applied with wrangler's D1 migration
@@ -626,13 +737,29 @@ npm run db:remote    # the same against production D1
 Add a new numbered file (for example `migrations/0007_add_post_tags.sql`) instead of editing
 one that has already been applied. Migrations run in filename order.
 
+**Migrations 0016, 0017 and pushes.** The GitHub Action deploys code and never migrations, so
+a push that carries a revival feature lands before its tables do. That order is safe on
+purpose: every revival-only read is gated on `gplus_schema()` (0016) or `gplus2_schema()`
+(0017), so the deployed site keeps its old feed and hides the new rail links until you run:
+
+```bash
+npm run db:remote
+```
+
+The command applies every pending migration in filename order, so one run covers both. Running
+it before the deploy is still tidier - the new screens appear the moment the deploy finishes
+instead of after a manual step.
+
 ## Deploy
 
 ```bash
 npm run deploy       # uv run pywrangler deploy
 ```
 
-After a schema change, apply it to the remote database with `npm run db:remote`.
+After a schema change, apply it to the remote database with `npm run db:remote` (for migrations
+0016 and 0017, before the deploy if you can: see ["Schema changes"](#schema-changes)).
+The email digest is optional and off until `EMAIL_API_KEY` / `EMAIL_FROM` are set as Worker
+secrets or variables; Jitsi rooms need no configuration at all.
 To put the Worker on your own domain, add a `routes` entry to `wrangler.jsonc`:
 
 ```jsonc
